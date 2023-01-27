@@ -38,6 +38,15 @@ func (n *NodeConfig) CreateBalancerPool(poolFile, from string) uint64 {
 	return poolID
 }
 
+func (n *NodeConfig) CollectFees(from, lowerTick, upperTick string, poolId uint64) {
+	n.LogActionF("collecting fees from concentrated position")
+	cmd := []string{"osmosisd", "tx", "concentratedliquidity", "collect-fees", lowerTick, upperTick, fmt.Sprintf("--pool-id=%d", poolId), fmt.Sprintf("--from=%s", from)}
+	_, _, err := n.containerManager.ExecTxCmd(n.t, n.chainId, n.Name, cmd)
+	require.NoError(n.t, err)
+
+	n.LogActionF("successfully collected fees for account %s", from)
+}
+
 func (n *NodeConfig) CreateConcentratedPool(from, denom1, denom2 string, tickSpacing uint64, exponentAtPriceOne int64, swapFee string) uint64 {
 	n.LogActionF("creating concentrated pool")
 
