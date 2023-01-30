@@ -59,9 +59,10 @@ func (suite *KeeperTestSuite) TestDeleteAllTokenPairArbRoutes() {
 func (suite *KeeperTestSuite) TestGetAllBaseDenoms() {
 	// Should be initialized on genesis
 	baseDenoms := suite.App.ProtoRevKeeper.GetAllBaseDenoms(suite.Ctx)
-	suite.Require().Equal(2, len(baseDenoms))
+	suite.Require().Equal(3, len(baseDenoms))
 	suite.Require().Equal(baseDenoms[0], types.OsmosisDenomination)
 	suite.Require().Equal(baseDenoms[1], types.AtomDenomination)
+	suite.Require().Equal(baseDenoms[2], "test/3")
 
 	// Should be able to delete all base denoms
 	suite.App.ProtoRevKeeper.DeleteBaseDenoms(suite.Ctx)
