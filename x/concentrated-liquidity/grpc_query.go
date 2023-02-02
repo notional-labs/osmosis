@@ -2,7 +2,6 @@ package concentrated_liquidity
 
 import (
 	"context"
-	"fmt"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -62,7 +61,6 @@ func (q Querier) Pool(
 
 // UserPositions returns positions of a specified address
 func (q Querier) UserPositions(ctx context.Context, req *types.QueryUserPositionsRequest) (*types.QueryUserPositionsResponse, error) {
-	fmt.Println("UserPositions QUERY. STARTING WITH REQUEST: ", req)
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "empty request")
 	}
