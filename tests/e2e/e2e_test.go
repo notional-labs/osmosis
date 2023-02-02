@@ -296,7 +296,11 @@ func (s *IntegrationTestSuite) TestAAAConcentratedLiquidity() {
 		outMinAmt = "1"
 	)
 
+<<<<<<< HEAD
 	// perform swap TODO: fix from gamm command to poolmanager
+=======
+	// perform swap
+>>>>>>> ec03c9fab (wip on e2e)
 	node.SwapExactAmountIn(uosmoIn, outMinAmt, fmt.Sprintf("%d", poolID), denom0, initialization.ValidatorWalletName)
 	// let the chain pick up the changes:
 	chainA.WaitForNumHeights(2)
@@ -309,7 +313,11 @@ func (s *IntegrationTestSuite) TestAAAConcentratedLiquidity() {
 	// assert that the balance changed and only for tokenIn
 	s.Require().True(addr1BalancesAfter[1].Amount.Equal(addr1BalancesBefore[1].Amount))
 	s.Require().True(addr1BalancesAfter[0].Amount.Equal(addr1BalancesBefore[0].Amount))
+<<<<<<< HEAD
 	// assert the amount of collected fees (SHOULD NOT BE LIKE SPECIFIED HERE, IT SHOULD NOT BE EQUAL):
+=======
+	// assert the amount of collected fees:
+>>>>>>> ec03c9fab (wip on e2e)
 
 	// Swap was performed at tick 0. Swap fee is 0.01, hence, fee is: 10000uosmo * 0.01 = 100uosmo
 	// At tick 0, there are 3 positions: both positions for address1 and one position for address3.
@@ -343,6 +351,10 @@ func (s *IntegrationTestSuite) TestAAAConcentratedLiquidity() {
 	node.CollectFees(address2, "2200", fmt.Sprintf("%d", maxTick), poolID)
 	addr2BalancesAfter := addrBalance(address2)
 	s.Require().Equal(addr2BalancesBefore, addr2BalancesAfter)
+<<<<<<< HEAD
+=======
+
+>>>>>>> ec03c9fab (wip on e2e)
 }
 
 // TestGeometricTwapMigration tests that the geometric twap record
