@@ -3,9 +3,6 @@ package e2e
 import (
 	"encoding/json"
 	"fmt"
-	transfertypes "github.com/cosmos/ibc-go/v4/modules/apps/transfer/types"
-	"github.com/iancoleman/orderedmap"
-	"github.com/osmosis-labs/osmosis/v14/tests/e2e/configurer/chain"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,11 +10,18 @@ import (
 	"strings"
 	"time"
 
+	transfertypes "github.com/cosmos/ibc-go/v4/modules/apps/transfer/types"
+	"github.com/iancoleman/orderedmap"
+
+	"github.com/osmosis-labs/osmosis/v14/tests/e2e/configurer/chain"
+
 	packetforwardingtypes "github.com/strangelove-ventures/packet-forward-middleware/v4/router/types"
 
 	ibchookskeeper "github.com/osmosis-labs/osmosis/x/ibc-hooks/keeper"
 
 	paramsutils "github.com/cosmos/cosmos-sdk/x/params/client/utils"
+
+	cl "github.com/osmosis-labs/osmosis/v14/x/concentrated-liquidity"
 
 	"github.com/osmosis-labs/osmosis/v14/x/concentrated-liquidity/types"
 	ibcratelimittypes "github.com/osmosis-labs/osmosis/v14/x/ibc-rate-limit/types"
@@ -29,7 +33,6 @@ import (
 	appparams "github.com/osmosis-labs/osmosis/v14/app/params"
 	"github.com/osmosis-labs/osmosis/v14/tests/e2e/configurer/config"
 	"github.com/osmosis-labs/osmosis/v14/tests/e2e/initialization"
-	cl "github.com/osmosis-labs/osmosis/v14/x/concentrated-liquidity"
 )
 
 // Reusable Checks
@@ -69,10 +72,26 @@ func (s *IntegrationTestSuite) TestConcentratedLiquidity() {
 		frozenUntil               int64  = time.Unix(86400, 0).Unix()
 		swapFee                          = "0.01"
 	)
+
+	// helpers
+	var (
+		// get pool
+		updatedPool = func(poolId uint64) types.ConcentratedPoolExtension {
+			concentratedPool, err := node.QueryConcentratedPool(poolId)
+			s.Require().NoError(err)
+			return concentratedPool
+		}
+		// get balances for address
+		addrBalance = func(address string) sdk.Coins {
+			addrBalances, err := node.QueryBalances(address)
+			s.Require().NoError(err)
+			return addrBalances
+		}
+	)
+
 	poolID := node.CreateConcentratedPool(initialization.ValidatorWalletName, denom0, denom1, tickSpacing, precisionFactorAtPriceOne, swapFee)
 
-	concentratedPool, err := node.QueryConcentratedPool(poolID)
-	s.Require().NoError(err)
+	concentratedPool := updatedPool(poolID)
 
 	// assert contents of the pool are valid
 	s.Require().Equal(concentratedPool.GetId(), poolID)
@@ -81,6 +100,8 @@ func (s *IntegrationTestSuite) TestConcentratedLiquidity() {
 	s.Require().Equal(concentratedPool.GetTickSpacing(), tickSpacing)
 	s.Require().Equal(concentratedPool.GetPrecisionFactorAtPriceOne(), sdk.NewInt(precisionFactorAtPriceOne))
 	s.Require().Equal(concentratedPool.GetSwapFee(sdk.Context{}), sdk.MustNewDecFromStr(swapFee))
+
+	// Concentrated Positions
 
 	minTick, maxTick := cl.GetMinAndMaxTicksFromExponentAtPriceOne(sdk.NewInt(precisionFactorAtPriceOne))
 
@@ -91,15 +112,15 @@ func (s *IntegrationTestSuite) TestConcentratedLiquidity() {
 	address3 := node.CreateWalletAndFund("addr3", fundTokens)
 
 	// Create 2 positions for node1: overlap together, overlap with 2 node3 positions)
-	node.CreateConcentratedPosition(address1, "[-1200]", "400", fmt.Sprintf("1000%s", denom0), fmt.Sprintf("1000%s", denom1), 0, 0, frozenUntil, poolID)
-	node.CreateConcentratedPosition(address1, "[-400]", "400", fmt.Sprintf("1000%s", denom0), fmt.Sprintf("1000%s", denom1), 0, 0, frozenUntil, poolID)
+	node.CreateConcentratedPosition(address1, "[-1200]", "400", fmt.Sprintf("100000%s", denom0), fmt.Sprintf("100000%s", denom1), 0, 0, frozenUntil, poolID)
+	node.CreateConcentratedPosition(address1, "[-400]", "400", fmt.Sprintf("100000%s", denom0), fmt.Sprintf("100000%s", denom1), 0, 0, frozenUntil, poolID)
 
 	// Create 1 position for node2: does not overlap with anything, ends at maximum
-	node.CreateConcentratedPosition(address2, "2200", fmt.Sprintf("%d", maxTick), fmt.Sprintf("1000%s", denom0), fmt.Sprintf("1000%s", denom1), 0, 0, frozenUntil, poolID)
+	node.CreateConcentratedPosition(address2, "2200", fmt.Sprintf("%d", maxTick), fmt.Sprintf("100000%s", denom0), fmt.Sprintf("100000%s", denom1), 0, 0, frozenUntil, poolID)
 
 	// Create 2 positions for node3: overlap together, overlap with 2 node1 positions, one position starts from minimum
-	node.CreateConcentratedPosition(address3, "[-1600]", "[-200]", fmt.Sprintf("1000%s", denom0), fmt.Sprintf("1000%s", denom1), 0, 0, frozenUntil, poolID)
-	node.CreateConcentratedPosition(address3, fmt.Sprintf("[%d]", minTick), "1400", fmt.Sprintf("1000%s", denom0), fmt.Sprintf("1000%s", denom1), 0, 0, frozenUntil, poolID)
+	node.CreateConcentratedPosition(address3, "[-1600]", "[-200]", fmt.Sprintf("100000%s", denom0), fmt.Sprintf("100000%s", denom1), 0, 0, frozenUntil, poolID)
+	node.CreateConcentratedPosition(address3, fmt.Sprintf("[%d]", minTick), "1400", fmt.Sprintf("100000%s", denom0), fmt.Sprintf("100000%s", denom1), 0, 0, frozenUntil, poolID)
 
 	// get newly created positions
 	positionsAddress1 := node.QueryConcentratedPositions(address1)
@@ -138,6 +159,62 @@ func (s *IntegrationTestSuite) TestConcentratedLiquidity() {
 	validateCLPosition(addr3position1, poolID, -1600, -200)
 	// second position third address
 	validateCLPosition(addr3position2, poolID, minTick, 1400)
+
+	// Collect Fees
+
+	var (
+		uosmoIn   = "10000uosmo"
+		outMinAmt = "1"
+	)
+
+	// perform swap
+	node.SwapExactAmountIn(uosmoIn, outMinAmt, fmt.Sprintf("%d", poolID), denom0, initialization.ValidatorWalletName)
+	// let the chain pick up the changes:
+	chainA.WaitForNumHeights(2)
+
+	// collect fees and track balances
+	addr1BalancesBefore := addrBalance(address1)
+	node.CollectFees(address1, "[-1200]", "400", poolID)
+	addr1BalancesAfter := addrBalance(address1)
+
+	// assert that the balance changed and only for tokenIn
+	s.Require().True(addr1BalancesAfter[1].Amount.Equal(addr1BalancesBefore[1].Amount))
+	s.Require().True(addr1BalancesAfter[0].Amount.Equal(addr1BalancesBefore[0].Amount))
+	// assert the amount of collected fees:
+
+	// Swap was performed at tick 0. Swap fee is 0.01, hence, fee is: 10000uosmo * 0.01 = 100uosmo
+	// At tick 0, there are 3 positions: both positions for address1 and one position for address3.
+	// Distribution is proportional to liquidity and initially the provided liquidity was the same for all positions, hence,
+	// in order to get a reward for every position, we should divide 100uosmo by 3.
+	// To sum up, collect fees should return 33uosmo for address1 for position1 after swap
+	s.Require().Equal(addr1BalancesBefore.AmountOf("uosmo").Add(sdk.NewInt(33)), addr1BalancesAfter.AmountOf("uosmo"))
+
+	// perform one more swap: assert new fee was added correctly to existing position which already has some fee rewards
+	node.SwapExactAmountIn(uosmoIn, outMinAmt, fmt.Sprintf("%d", poolID), denom0, initialization.ValidatorWalletName)
+	// let the chain pick up the changes:
+	chainA.WaitForNumHeights(2)
+
+	// track balance of address3
+	addr3BalancesBefore := addrBalance(address3)
+	node.CollectFees(address3, fmt.Sprintf("[%d]", minTick), "1400", poolID)
+	addr3BalancesAfter := addrBalance(address3)
+
+	// assert that the balance changed and only for tokenIn
+	s.Require().True(addr3BalancesAfter[1].Amount.Equal(addr3BalancesBefore[1].Amount))
+	s.Require().True(addr3BalancesAfter[0].Amount.Equal(addr3BalancesBefore[0].Amount))
+
+	// assert the amount of collected fees:
+	// address3 had only one position that contains tick 0
+	// From the first swap, it should have 33uosmo, the latest swap added 33uosmo more
+	// Hence, in result we should get 66uosmo
+	s.Require().Equal(addr3BalancesBefore.AmountOf("uosmo").Add(sdk.NewInt(66)), addr3BalancesAfter.AmountOf("uosmo"))
+
+	// assert that position which does not contain tick0 was not affected
+	addr2BalancesBefore := addrBalance(address2)
+	node.CollectFees(address2, "2200", fmt.Sprintf("%d", maxTick), poolID)
+	addr2BalancesAfter := addrBalance(address2)
+	s.Require().Equal(addr2BalancesBefore, addr2BalancesAfter)
+
 }
 
 // TestGeometricTwapMigration tests that the geometric twap record
