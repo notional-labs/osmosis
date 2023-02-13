@@ -180,7 +180,7 @@ func (s *IntegrationTestSuite) TestConcentratedLiquidity() {
 	// assert that the balance changed and only for tokenIn
 	s.Require().True(addr1BalancesAfter[1].Amount.Equal(addr1BalancesBefore[1].Amount))
 	s.Require().True(addr1BalancesAfter[0].Amount.Equal(addr1BalancesBefore[0].Amount))
-	// assert the amount of collected fees:
+	// assert the amount of collected fees (SHOULD NOT BE LIKE SPECIFIED HERE, IT SHOULD NOT BE EQUAL):
 
 	// Swap was performed at tick 0. Swap fee is 0.01, hence, fee is: 10000uosmo * 0.01 = 100uosmo
 	// At tick 0, there are 3 positions: both positions for address1 and one position for address3.
