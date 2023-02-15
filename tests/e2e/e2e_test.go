@@ -59,7 +59,7 @@ func (s *IntegrationTestSuite) CheckBalance(node *chain.NodeConfig, addr, denom 
 	)
 }
 
-func (s *IntegrationTestSuite) TestConcentratedLiquidity() {
+func (s *IntegrationTestSuite) TestAAAConcentratedLiquidity() {
 	chainA := s.configurer.GetChainConfig(0)
 	node, err := chainA.GetDefaultNode()
 	s.Require().NoError(err)
@@ -126,6 +126,7 @@ func (s *IntegrationTestSuite) TestConcentratedLiquidity() {
 	positionsAddress1 := node.QueryConcentratedPositions(address1)
 	positionsAddress2 := node.QueryConcentratedPositions(address2)
 	positionsAddress3 := node.QueryConcentratedPositions(address3)
+	concentratedPool = updatedPool(poolID)
 
 	// assert number of positions per address
 	s.Require().Equal(len(positionsAddress1), 2)
@@ -167,7 +168,7 @@ func (s *IntegrationTestSuite) TestConcentratedLiquidity() {
 		outMinAmt = "1"
 	)
 
-	// perform swap
+	// perform swap TODO: fix from gamm command to poolmanager
 	node.SwapExactAmountIn(uosmoIn, outMinAmt, fmt.Sprintf("%d", poolID), denom0, initialization.ValidatorWalletName)
 	// let the chain pick up the changes:
 	chainA.WaitForNumHeights(2)
@@ -214,7 +215,6 @@ func (s *IntegrationTestSuite) TestConcentratedLiquidity() {
 	node.CollectFees(address2, "2200", fmt.Sprintf("%d", maxTick), poolID)
 	addr2BalancesAfter := addrBalance(address2)
 	s.Require().Equal(addr2BalancesBefore, addr2BalancesAfter)
-
 }
 
 // TestGeometricTwapMigration tests that the geometric twap record
