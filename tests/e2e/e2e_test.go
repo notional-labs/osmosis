@@ -207,7 +207,7 @@ func (s *IntegrationTestSuite) TestConcentratedLiquidity() {
 
 	// helpers
 	var (
-		// get pool
+		// get current (updated) pool
 		updatedPool = func(poolId uint64) types.ConcentratedPoolExtension {
 			concentratedPool, err := node.QueryConcentratedPool(poolId)
 			s.Require().NoError(err)
@@ -311,12 +311,14 @@ func (s *IntegrationTestSuite) TestConcentratedLiquidity() {
 		outMinAmt = "1"
 	)
 
-	// perform swap
+	// Perform swap
+	// This swap moves current tick to approximately 327th index, which means no initialized ticks are crossed during this swap.
+	// Swap affects 3 positions: both that address1 has and one of address3's positions
 	node.SwapExactAmountIn(uosmoIn, outMinAmt, fmt.Sprintf("%d", poolID), denom0, initialization.ValidatorWalletName)
 	// let the chain pick up the changes:
 	chainA.WaitForNumHeights(2)
 
-	// collect fees and track balances
+	// Collect fees and track balances for address1 for position1
 	addr1BalancesBefore := addrBalance(address1)
 	node.CollectFees(address1, "[-1200]", "400", poolID)
 	addr1BalancesAfter := addrBalance(address1)
@@ -333,7 +335,9 @@ func (s *IntegrationTestSuite) TestConcentratedLiquidity() {
 	// Collect fees should return 33uosmo for address1 for position1 after the swap
 	s.Require().Equal(addr1BalancesBefore.AmountOf("uosmo").Add(sdk.NewInt(33)), addr1BalancesAfter.AmountOf("uosmo"))
 
+	// TODO: check this calculation better, this swap should cross one of initialized ticks, which should distribute more fees to other 2 positions
 	// perform one more swap: assert new fee was added correctly to existing position which already has some fee rewards
+	// PS: fees were collected only for 1 position that address1 has, address3 position's (that contains current tick) uncollected fees will be a sum of fees collected from 2 swaps
 	node.SwapExactAmountIn(uosmoIn, outMinAmt, fmt.Sprintf("%d", poolID), denom0, initialization.ValidatorWalletName)
 	// let the chain pick up the changes:
 	chainA.WaitForNumHeights(2)
@@ -343,7 +347,7 @@ func (s *IntegrationTestSuite) TestConcentratedLiquidity() {
 	node.CollectFees(address3, fmt.Sprintf("[%d]", minTick), "1400", poolID)
 	addr3BalancesAfter := addrBalance(address3)
 
-	// assert that the balance changed and only for tokenIn
+	// assert that the balance changed only for tokenIn
 	assertDefaultBalances(addr3BalancesBefore, addr3BalancesAfter)
 
 	// assert the amount of collected fees:
