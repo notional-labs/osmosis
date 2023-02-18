@@ -296,11 +296,7 @@ func (s *IntegrationTestSuite) TestAAAConcentratedLiquidity() {
 		outMinAmt = "1"
 	)
 
-<<<<<<< HEAD
 	// perform swap TODO: fix from gamm command to poolmanager
-=======
-	// perform swap
->>>>>>> ec03c9fab (wip on e2e)
 	node.SwapExactAmountIn(uosmoIn, outMinAmt, fmt.Sprintf("%d", poolID), denom0, initialization.ValidatorWalletName)
 	// let the chain pick up the changes:
 	chainA.WaitForNumHeights(2)
@@ -313,11 +309,7 @@ func (s *IntegrationTestSuite) TestAAAConcentratedLiquidity() {
 	// assert that the balance changed and only for tokenIn
 	s.Require().True(addr1BalancesAfter[1].Amount.Equal(addr1BalancesBefore[1].Amount))
 	s.Require().True(addr1BalancesAfter[0].Amount.Equal(addr1BalancesBefore[0].Amount))
-<<<<<<< HEAD
-	// assert the amount of collected fees (SHOULD NOT BE LIKE SPECIFIED HERE, IT SHOULD NOT BE EQUAL):
-=======
 	// assert the amount of collected fees:
->>>>>>> ec03c9fab (wip on e2e)
 
 	// Swap was performed at tick 0. Swap fee is 0.01, hence, fee is: 10000uosmo * 0.01 = 100uosmo
 	// At tick 0, there are 3 positions: both positions for address1 and one position for address3.
@@ -351,10 +343,46 @@ func (s *IntegrationTestSuite) TestAAAConcentratedLiquidity() {
 	node.CollectFees(address2, "2200", fmt.Sprintf("%d", maxTick), poolID)
 	addr2BalancesAfter := addrBalance(address2)
 	s.Require().Equal(addr2BalancesBefore, addr2BalancesAfter)
-<<<<<<< HEAD
-=======
 
->>>>>>> ec03c9fab (wip on e2e)
+	// Withdraw Position:
+	var (
+		defaultLiquidityRemoval string = "1000"
+	)
+
+	// Assert removing some liquidity
+	// address1: check removing some amount of liquidity
+	address1position1liquidityBefore := positionsAddress1[0].Liquidity
+	node.WithdrawPosition(address1, "[-1200]", "400", defaultLiquidityRemoval, poolID, frozenUntil)
+	// assert
+	positionsAddress1 = node.QueryConcentratedPositions(address1)
+	s.Require().Equal(address1position1liquidityBefore, positionsAddress1[0].Liquidity.Add(sdk.MustNewDecFromStr(defaultLiquidityRemoval)))
+
+	// address2: check removing some amount of liquidity
+	address2position1liquidityBefore := positionsAddress2[0].Liquidity
+	node.WithdrawPosition(address2, "2200", fmt.Sprintf("%d", maxTick), defaultLiquidityRemoval, poolID, frozenUntil)
+	// assert
+	positionsAddress2 = node.QueryConcentratedPositions(address2)
+	s.Require().Equal(address2position1liquidityBefore, positionsAddress2[0].Liquidity.Add(sdk.MustNewDecFromStr(defaultLiquidityRemoval)))
+
+	// address3: check removing some amount of liquidity
+	address3position1liquidityBefore := positionsAddress3[0].Liquidity
+	node.WithdrawPosition(address3, "[-1600]", "[-200]", defaultLiquidityRemoval, poolID, frozenUntil)
+	// assert
+	positionsAddress3 = node.QueryConcentratedPositions(address3)
+	s.Require().Equal(address3position1liquidityBefore, positionsAddress3[0].Liquidity.Add(sdk.MustNewDecFromStr(defaultLiquidityRemoval)))
+
+	// Assert removing all liquidity
+	// address2: no more positions left
+	allLiquidityAddress2Position1 := positionsAddress2[0].Liquidity
+	node.WithdrawPosition(address2, "2200", fmt.Sprintf("%d", maxTick), allLiquidityAddress2Position1.String(), poolID, frozenUntil)
+	positionsAddress2 = node.QueryConcentratedPositions(address2)
+	s.Require().Empty(positionsAddress2)
+
+	// address1: one position left
+	allLiquidityAddress1Position1 := positionsAddress1[0].Liquidity
+	node.WithdrawPosition(address1, "[-1200]", "400", allLiquidityAddress1Position1.String(), poolID, frozenUntil)
+	positionsAddress1 = node.QueryConcentratedPositions(address1)
+	s.Require().Equal(len(positionsAddress1), 1)
 }
 
 // TestGeometricTwapMigration tests that the geometric twap record
