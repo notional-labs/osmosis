@@ -311,7 +311,7 @@ func (s *IntegrationTestSuite) TestAAAConcentratedLiquidity() {
 		outMinAmt = "1"
 	)
 
-	// perform swap TODO: fix from gamm command to poolmanager
+	// perform swap
 	node.SwapExactAmountIn(uosmoIn, outMinAmt, fmt.Sprintf("%d", poolID), denom0, initialization.ValidatorWalletName)
 	// let the chain pick up the changes:
 	chainA.WaitForNumHeights(2)
