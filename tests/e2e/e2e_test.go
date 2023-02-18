@@ -239,14 +239,14 @@ func (s *IntegrationTestSuite) TestAAAConcentratedLiquidity() {
 	address2 := node.CreateWalletAndFund("addr2", fundTokens)
 	address3 := node.CreateWalletAndFund("addr3", fundTokens)
 
-	// Create 2 positions for node1: overlap together, overlap with 2 node3 positions)
+	// Create 2 positions for address1: overlap together, overlap with 2 address3 positions)
 	node.CreateConcentratedPosition(address1, "[-1200]", "400", fmt.Sprintf("100000%s", denom0), fmt.Sprintf("100000%s", denom1), 0, 0, frozenUntil, poolID)
 	node.CreateConcentratedPosition(address1, "[-400]", "400", fmt.Sprintf("100000%s", denom0), fmt.Sprintf("100000%s", denom1), 0, 0, frozenUntil, poolID)
 
-	// Create 1 position for node2: does not overlap with anything, ends at maximum
+	// Create 1 position for address2: does not overlap with anything, ends at maximum
 	node.CreateConcentratedPosition(address2, "2200", fmt.Sprintf("%d", maxTick), fmt.Sprintf("100000%s", denom0), fmt.Sprintf("100000%s", denom1), 0, 0, frozenUntil, poolID)
 
-	// Create 2 positions for node3: overlap together, overlap with 2 node1 positions, one position starts from minimum
+	// Create 2 positions for address3: overlap together, overlap with 2 address1 positions, one position starts from minimum
 	node.CreateConcentratedPosition(address3, "[-1600]", "[-200]", fmt.Sprintf("100000%s", denom0), fmt.Sprintf("100000%s", denom1), 0, 0, frozenUntil, poolID)
 	node.CreateConcentratedPosition(address3, fmt.Sprintf("[%d]", minTick), "1400", fmt.Sprintf("100000%s", denom0), fmt.Sprintf("100000%s", denom1), 0, 0, frozenUntil, poolID)
 
