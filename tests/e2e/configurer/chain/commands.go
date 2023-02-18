@@ -39,6 +39,7 @@ func (n *NodeConfig) CreateBalancerPool(poolFile, from string) uint64 {
 	return poolID
 }
 
+// CollectFees collects fees earned by concentrated position in range of [lowerTick; upperTick] in pool with id of poolId
 func (n *NodeConfig) CollectFees(from, lowerTick, upperTick string, poolId uint64) {
 	n.LogActionF("collecting fees from concentrated position")
 	cmd := []string{"osmosisd", "tx", "concentratedliquidity", "collect-fees", lowerTick, upperTick, fmt.Sprintf("--pool-id=%d", poolId), fmt.Sprintf("--from=%s", from)}
@@ -48,6 +49,8 @@ func (n *NodeConfig) CollectFees(from, lowerTick, upperTick string, poolId uint6
 	n.LogActionF("successfully collected fees for account %s", from)
 }
 
+// CreateConcentratedPool creates a concentrated pool.
+// Returns pool id of newly created pool
 func (n *NodeConfig) CreateConcentratedPool(from, denom1, denom2 string, tickSpacing uint64, exponentAtPriceOne int64, swapFee string) uint64 {
 	n.LogActionF("creating concentrated pool")
 
@@ -60,6 +63,8 @@ func (n *NodeConfig) CreateConcentratedPool(from, denom1, denom2 string, tickSpa
 	return poolID
 }
 
+// CreateConcentratedPosition creates a concentrated position from [lowerTick; upperTick] in pool with id of poolId
+// token{0,1} - liquidity to create position with
 func (n *NodeConfig) CreateConcentratedPosition(from, lowerTick, upperTick string, token0, token1 string, token0MinAmt, token1MinAmt int64, frozenUntil int64, poolId uint64) {
 	n.LogActionF("creating concentrated position")
 
@@ -78,6 +83,7 @@ func (n *NodeConfig) StoreWasmCode(wasmFile, from string) {
 	n.LogActionF("successfully stored")
 }
 
+// WithdrawPosition withdraws liquidityOut amount of virtual liquidity from position in range of [lowerTick; upperTick] in pool with id of poolId
 func (n *NodeConfig) WithdrawPosition(from, lowerTick, upperTick string, liquidityOut string, poolId uint64, frozenUntil int64) {
 	n.LogActionF("withdrawing liquidity from position")
 	cmd := []string{"osmosisd", "tx", "concentratedliquidity", "withdraw-position", lowerTick, upperTick, liquidityOut, fmt.Sprintf("%d", frozenUntil), fmt.Sprintf("--from=%s", from), fmt.Sprintf("--pool-id=%d", poolId)}
