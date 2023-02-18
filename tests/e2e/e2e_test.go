@@ -225,9 +225,9 @@ func (s *IntegrationTestSuite) TestAAAConcentratedLiquidity() {
 		// * same number of `stake`, `uion` in balancesBefore and balancesAfter
 		// * amount of `e2e-default-feetoken` dropped by 1000 (default amount for fee per tx)
 		assertDefaultBalances = func(balancesBefore, balancesAfter sdk.Coins) {
-			s.Require().True(balancesAfter[2].Amount.Equal(balancesBefore[2].Amount))
-			s.Require().True(balancesAfter[1].Amount.Equal(balancesBefore[1].Amount))
-			s.Require().True(balancesAfter[0].Amount.Equal(balancesBefore[0].Amount.Sub(defaultFeePerTx)))
+			s.Require().True(balancesAfter.AmountOf("stake").Equal(balancesBefore.AmountOf("stake")))
+			s.Require().True(balancesAfter.AmountOf("uion").Equal(balancesBefore.AmountOf("uion")))
+			s.Require().True(balancesAfter.AmountOf("e2e-default-feetoken").Equal(balancesBefore.AmountOf("e2e-default-feetoken").Sub(defaultFeePerTx)))
 		}
 	)
 
@@ -321,7 +321,7 @@ func (s *IntegrationTestSuite) TestAAAConcentratedLiquidity() {
 	node.CollectFees(address1, "[-1200]", "400", poolID)
 	addr1BalancesAfter := addrBalance(address1)
 
-	// assert that the balance changed and only for tokenIn (uosmo in this case - index in addr1Balances{Before, After} is 3)
+	// assert that the balance changed and only for tokenIn
 	assertDefaultBalances(addr1BalancesBefore, addr1BalancesAfter)
 
 	// assert the amount of collected fees:
