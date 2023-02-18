@@ -223,7 +223,7 @@ func (s *IntegrationTestSuite) TestAAAConcentratedLiquidity() {
 
 		// assert balances that are not affected by swap:
 		// * same number of `stake`, `uion` in balancesBefore and balancesAfter
-		// * amount of e2e-fee-token dropped by 1000 (default amount for fee per tx)
+		// * amount of `e2e-default-feetoken` dropped by 1000 (default amount for fee per tx)
 		assertDefaultBalances = func(balancesBefore, balancesAfter sdk.Coins) {
 			s.Require().True(balancesAfter[2].Amount.Equal(balancesBefore[2].Amount))
 			s.Require().True(balancesAfter[1].Amount.Equal(balancesBefore[1].Amount))
