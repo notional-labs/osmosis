@@ -187,7 +187,7 @@ func (s *IntegrationTestSuite) CheckBalance(node *chain.NodeConfig, addr, denom 
 	)
 }
 
-func (s *IntegrationTestSuite) TestAAAConcentratedLiquidity() {
+func (s *IntegrationTestSuite) TestConcentratedLiquidity() {
 	chainA := s.configurer.GetChainConfig(0)
 	node, err := chainA.GetDefaultNode()
 	s.Require().NoError(err)
