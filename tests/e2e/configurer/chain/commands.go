@@ -50,7 +50,7 @@ func (n *NodeConfig) CollectFees(from, lowerTick, upperTick string, poolId uint6
 }
 
 // CreateConcentratedPool creates a concentrated pool.
-// Returns pool id of newly created pool
+// Returns pool id of newly created pool on success
 func (n *NodeConfig) CreateConcentratedPool(from, denom1, denom2 string, tickSpacing uint64, exponentAtPriceOne int64, swapFee string) uint64 {
 	n.LogActionF("creating concentrated pool")
 
