@@ -193,12 +193,16 @@ func (s *IntegrationTestSuite) TestAAAConcentratedLiquidity() {
 	s.Require().NoError(err)
 
 	var (
+		// pool parameters
 		denom0                    string = "uion"
 		denom1                    string = "uosmo"
 		tickSpacing               uint64 = 1
 		precisionFactorAtPriceOne int64  = -1
 		frozenUntil               int64  = time.Unix(86400, 0).Unix()
 		swapFee                          = "0.01"
+
+		// defaults
+		defaultFeePerTx = sdk.NewInt(1000)
 	)
 
 	// helpers
@@ -209,11 +213,21 @@ func (s *IntegrationTestSuite) TestAAAConcentratedLiquidity() {
 			s.Require().NoError(err)
 			return concentratedPool
 		}
+
 		// get balances for address
 		addrBalance = func(address string) sdk.Coins {
 			addrBalances, err := node.QueryBalances(address)
 			s.Require().NoError(err)
 			return addrBalances
+		}
+
+		// assert balances that are not affected by swap:
+		// * same number of `stake`, `uion` in balancesBefore and balancesAfter
+		// * amount of e2e-fee-token dropped by 1000 (default amount for fee per tx)
+		assertDefaultBalances = func(balancesBefore, balancesAfter sdk.Coins) {
+			s.Require().True(balancesAfter[2].Amount.Equal(balancesBefore[2].Amount))
+			s.Require().True(balancesAfter[1].Amount.Equal(balancesBefore[1].Amount))
+			s.Require().True(balancesAfter[0].Amount.Equal(balancesBefore[0].Amount.Sub(defaultFeePerTx)))
 		}
 	)
 
@@ -292,6 +306,7 @@ func (s *IntegrationTestSuite) TestAAAConcentratedLiquidity() {
 	// Collect Fees
 
 	var (
+		// swap parameters
 		uosmoIn   = "10000uosmo"
 		outMinAmt = "1"
 	)
@@ -306,16 +321,16 @@ func (s *IntegrationTestSuite) TestAAAConcentratedLiquidity() {
 	node.CollectFees(address1, "[-1200]", "400", poolID)
 	addr1BalancesAfter := addrBalance(address1)
 
-	// assert that the balance changed and only for tokenIn
-	s.Require().True(addr1BalancesAfter[1].Amount.Equal(addr1BalancesBefore[1].Amount))
-	s.Require().True(addr1BalancesAfter[0].Amount.Equal(addr1BalancesBefore[0].Amount))
+	// assert that the balance changed and only for tokenIn (uosmo in this case - index in addr1Balances{Before, After} is 3)
+	assertDefaultBalances(addr1BalancesBefore, addr1BalancesAfter)
+
 	// assert the amount of collected fees:
 
 	// Swap was performed at tick 0. Swap fee is 0.01, hence, fee is: 10000uosmo * 0.01 = 100uosmo
 	// At tick 0, there are 3 positions: both positions for address1 and one position for address3.
 	// Distribution is proportional to liquidity and initially the provided liquidity was the same for all positions, hence,
 	// in order to get a reward for every position, we should divide 100uosmo by 3.
-	// To sum up, collect fees should return 33uosmo for address1 for position1 after swap
+	// Collect fees should return 33uosmo for address1 for position1 after the swap
 	s.Require().Equal(addr1BalancesBefore.AmountOf("uosmo").Add(sdk.NewInt(33)), addr1BalancesAfter.AmountOf("uosmo"))
 
 	// perform one more swap: assert new fee was added correctly to existing position which already has some fee rewards
@@ -329,8 +344,7 @@ func (s *IntegrationTestSuite) TestAAAConcentratedLiquidity() {
 	addr3BalancesAfter := addrBalance(address3)
 
 	// assert that the balance changed and only for tokenIn
-	s.Require().True(addr3BalancesAfter[1].Amount.Equal(addr3BalancesBefore[1].Amount))
-	s.Require().True(addr3BalancesAfter[0].Amount.Equal(addr3BalancesBefore[0].Amount))
+	assertDefaultBalances(addr3BalancesBefore, addr3BalancesAfter)
 
 	// assert the amount of collected fees:
 	// address3 had only one position that contains tick 0
@@ -342,10 +356,16 @@ func (s *IntegrationTestSuite) TestAAAConcentratedLiquidity() {
 	addr2BalancesBefore := addrBalance(address2)
 	node.CollectFees(address2, "2200", fmt.Sprintf("%d", maxTick), poolID)
 	addr2BalancesAfter := addrBalance(address2)
-	s.Require().Equal(addr2BalancesBefore, addr2BalancesAfter)
+
+	// assert that the balance changed and only for tokenIn
+	assertDefaultBalances(addr2BalancesBefore, addr2BalancesAfter)
+
+	// range was not affected by swap, collect fees should not update address balance
+	s.Require().True(addr2BalancesAfter[3].Amount.Equal(addr2BalancesBefore[3].Amount))
 
 	// Withdraw Position:
 	var (
+		// withdraw position parameters
 		defaultLiquidityRemoval string = "1000"
 	)
 
