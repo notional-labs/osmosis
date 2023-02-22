@@ -54,6 +54,7 @@ func NewAppConstructor() network.AppConstructor {
 			simapp.EmptyAppOptions{},
 			GetWasmEnabledProposals(),
 			EmptyWasmOpts,
+			fauxMerkleModeOpt,
 			baseapp.SetMinGasPrices(val.AppConfig.MinGasPrices),
 		)
 	}

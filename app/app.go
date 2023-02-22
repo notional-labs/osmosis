@@ -138,6 +138,11 @@ type OsmosisApp struct {
 	configurator module.Configurator
 }
 
+// Pass this in as an option to use a dbStoreAdapter instead of an IAVLStore for simulation speed.
+func fauxMerkleModeOpt(app *baseapp.BaseApp) {
+	app.SetFauxMerkleMode()
+}
+
 // init sets DefaultNodeHome to default osmosisd install location.
 func init() {
 	userHomeDir, err := os.UserHomeDir()
