@@ -35,7 +35,11 @@ func (k Keeper) GetRiskAdjustedOsmoValue(ctx sdk.Context, asset types.Superfluid
 
 func (k Keeper) UnriskAdjustOsmoValue(ctx sdk.Context, amount sdk.Dec) sdk.Dec {
 	minRiskFactor := k.GetParams(ctx).MinimumRiskFactor
-	return amount.Quo(sdk.OneDec().Sub(minRiskFactor))
+	divisor := sdk.OneDec().Sub(minRiskFactor)
+	if divisor.Equal(sdk.ZeroDec()) {
+		panic("cannot do division by divisor = 0")
+	}
+	return amount.Quo(divisor)
 }
 
 func (k Keeper) AddNewSuperfluidAsset(ctx sdk.Context, asset types.SuperfluidAsset) error {
