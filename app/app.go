@@ -9,8 +9,6 @@ import (
 	"reflect"
 	"strings"
 
-	wasmtypes "github.com/CosmWasm/wasmd/x/wasm/types"
-
 	vestingtypes "github.com/cosmos/cosmos-sdk/x/auth/vesting/types"
 	"github.com/osmosis-labs/osmosis/osmoutils"
 
@@ -159,14 +157,6 @@ func initReusablePackageInjections() {
 	osmoutils.OsmoUtilsExtraAccountTypes = map[reflect.Type]struct{}{
 		reflect.TypeOf(&vestingtypes.ClawbackVestingAccount{}): {},
 	}
-}
-
-// overrideWasmVariables overrides the wasm variables to:
-//   - allow for larger wasm files
-func overrideWasmVariables() {
-	// Override Wasm size limitation from WASMD.
-	wasmtypes.MaxWasmSize = 3 * 1024 * 1024
-	wasmtypes.MaxProposalWasmSize = wasmtypes.MaxWasmSize
 }
 
 // NewOsmosisApp returns a reference to an initialized Osmosis.
