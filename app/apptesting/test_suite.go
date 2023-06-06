@@ -30,15 +30,15 @@ import (
 	tmtypes "github.com/tendermint/tendermint/proto/tendermint/types"
 	dbm "github.com/tendermint/tm-db"
 
-	"github.com/osmosis-labs/osmosis/v15/app"
+	"github.com/osmosis-labs/osmosis/v16/app"
 
-	"github.com/osmosis-labs/osmosis/v15/x/gamm/pool-models/balancer"
-	gammtypes "github.com/osmosis-labs/osmosis/v15/x/gamm/types"
+	"github.com/osmosis-labs/osmosis/v16/x/gamm/pool-models/balancer"
+	gammtypes "github.com/osmosis-labs/osmosis/v16/x/gamm/types"
 
-	lockupkeeper "github.com/osmosis-labs/osmosis/v15/x/lockup/keeper"
-	lockuptypes "github.com/osmosis-labs/osmosis/v15/x/lockup/types"
-	minttypes "github.com/osmosis-labs/osmosis/v15/x/mint/types"
-	poolmanagertypes "github.com/osmosis-labs/osmosis/v15/x/poolmanager/types"
+	lockupkeeper "github.com/osmosis-labs/osmosis/v16/x/lockup/keeper"
+	lockuptypes "github.com/osmosis-labs/osmosis/v16/x/lockup/types"
+	minttypes "github.com/osmosis-labs/osmosis/v16/x/mint/types"
+	poolmanagertypes "github.com/osmosis-labs/osmosis/v16/x/poolmanager/types"
 )
 
 type KeeperTestHelper struct {
@@ -58,6 +58,17 @@ var (
 // Setup sets up basic environment for suite (App, Ctx, and test accounts)
 func (s *KeeperTestHelper) Setup() {
 	s.App = app.Setup(false)
+	s.setupGeneral()
+}
+
+func (s *KeeperTestHelper) SetupWithLevelDb() func() {
+	app, cleanup := app.SetupTestingAppWithLevelDb(false)
+	s.App = app
+	s.setupGeneral()
+	return cleanup
+}
+
+func (s *KeeperTestHelper) setupGeneral() {
 	s.Ctx = s.App.BaseApp.NewContext(false, tmtypes.Header{Height: 1, ChainID: "osmosis-1", Time: time.Now().UTC()})
 	s.QueryHelper = &baseapp.QueryServiceTestHelper{
 		GRPCQueryRouter: s.App.GRPCQueryRouter(),

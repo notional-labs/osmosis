@@ -6,10 +6,10 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	cl "github.com/osmosis-labs/osmosis/v15/x/concentrated-liquidity"
-	clmodel "github.com/osmosis-labs/osmosis/v15/x/concentrated-liquidity/model"
-	"github.com/osmosis-labs/osmosis/v15/x/concentrated-liquidity/types"
-	poolmanagertypes "github.com/osmosis-labs/osmosis/v15/x/poolmanager/types"
+	cl "github.com/osmosis-labs/osmosis/v16/x/concentrated-liquidity"
+	clmodel "github.com/osmosis-labs/osmosis/v16/x/concentrated-liquidity/model"
+	"github.com/osmosis-labs/osmosis/v16/x/concentrated-liquidity/types"
+	poolmanagertypes "github.com/osmosis-labs/osmosis/v16/x/poolmanager/types"
 )
 
 func (s *KeeperTestSuite) TestInitializePool() {
@@ -96,9 +96,9 @@ func (s *KeeperTestSuite) TestInitializePool() {
 				s.Require().NoError(err)
 
 				// Ensure that fee accumulator has been properly initialized
-				feeAccumulator, err := s.App.ConcentratedLiquidityKeeper.GetFeeAccumulator(s.Ctx, test.poolI.GetId())
+				spreadRewardAccumulator, err := s.App.ConcentratedLiquidityKeeper.GetSpreadRewardAccumulator(s.Ctx, test.poolI.GetId())
 				s.Require().NoError(err)
-				s.Require().Equal(sdk.DecCoins(nil), feeAccumulator.GetValue())
+				s.Require().Equal(sdk.DecCoins(nil), spreadRewardAccumulator.GetValue())
 
 				// Ensure that uptime accumulators have been properly initialized
 				uptimeAccumulators, err := s.App.ConcentratedLiquidityKeeper.GetUptimeAccumulators(s.Ctx, test.poolI.GetId())
@@ -115,7 +115,7 @@ func (s *KeeperTestSuite) TestInitializePool() {
 				s.Require().ErrorContains(err, test.expectedErr.Error())
 
 				// Ensure that fee accumulator has not been initialized
-				_, err := s.App.ConcentratedLiquidityKeeper.GetFeeAccumulator(s.Ctx, test.poolI.GetId())
+				_, err := s.App.ConcentratedLiquidityKeeper.GetSpreadRewardAccumulator(s.Ctx, test.poolI.GetId())
 				s.Require().Error(err)
 
 				// Ensure that uptime accumulators have not been initialized
@@ -177,31 +177,14 @@ func (s *KeeperTestSuite) TestGetPoolById() {
 	}
 }
 
-func (s *KeeperTestSuite) TestPoolExists() {
-	s.SetupTest()
-
-	// Create default CL pool
-	pool := s.PrepareConcentratedPool()
-
-	// Check that the pool exists
-	poolExists := s.App.ConcentratedLiquidityKeeper.PoolExists(s.Ctx, pool.GetId())
-	s.Require().True(poolExists)
-
-	// try checking for a non-existent pool
-	poolExists = s.App.ConcentratedLiquidityKeeper.PoolExists(s.Ctx, 2)
-
-	// ensure that this returns false
-	s.Require().False(poolExists)
-}
-
-func (s *KeeperTestSuite) TestConvertConcentratedToPoolInterface() {
+func (s *KeeperTestSuite) TestAsPoolI() {
 	s.SetupTest()
 
 	// Create default CL pool
 	concentratedPool := s.PrepareConcentratedPool()
 
 	// Ensure no error occurs when converting to PoolInterface
-	_, err := cl.ConvertConcentratedToPoolInterface(concentratedPool)
+	_, err := cl.AsPoolI(concentratedPool)
 	s.Require().NoError(err)
 }
 
@@ -214,7 +197,7 @@ func (s *KeeperTestSuite) TestPoolIToConcentratedPool() {
 	s.Require().True(ok)
 
 	// Ensure no error occurs when converting to ConcentratedPool
-	_, err := cl.ConvertPoolInterfaceToConcentrated(poolI)
+	_, err := cl.AsConcentrated(poolI)
 	s.Require().NoError(err)
 
 	// Create a default stableswap pool
@@ -223,7 +206,7 @@ func (s *KeeperTestSuite) TestPoolIToConcentratedPool() {
 	s.Require().NoError(err)
 
 	// Ensure error occurs when converting to ConcentratedPool
-	_, err = cl.ConvertPoolInterfaceToConcentrated(stableswapPool)
+	_, err = cl.AsConcentrated(stableswapPool)
 	s.Require().Error(err)
 	s.Require().ErrorContains(err, fmt.Errorf("given pool does not implement ConcentratedPoolExtension, implements %T", stableswapPool).Error())
 }

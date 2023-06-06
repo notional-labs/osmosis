@@ -7,10 +7,10 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	cltypes "github.com/osmosis-labs/osmosis/v15/x/concentrated-liquidity/types"
-	gammtypes "github.com/osmosis-labs/osmosis/v15/x/gamm/types"
-	lockuptypes "github.com/osmosis-labs/osmosis/v15/x/lockup/types"
-	"github.com/osmosis-labs/osmosis/v15/x/superfluid/types"
+	cltypes "github.com/osmosis-labs/osmosis/v16/x/concentrated-liquidity/types"
+	gammtypes "github.com/osmosis-labs/osmosis/v16/x/gamm/types"
+	lockuptypes "github.com/osmosis-labs/osmosis/v16/x/lockup/types"
+	"github.com/osmosis-labs/osmosis/v16/x/superfluid/types"
 )
 
 type MigrationType int
@@ -19,6 +19,7 @@ const (
 	SuperfluidBonded MigrationType = iota
 	SuperfluidUnbonding
 	NonSuperfluid
+	Unlocked
 	Unsupported
 )
 
@@ -28,18 +29,21 @@ const (
 // If the lock is locked or unlocking but not superfluid delegated/undelegating, it will migrate the position and either start unlocking or continue unlocking where it left off.
 // Errors if the lock is not found, if the lock is not a balancer pool lock, or if the lock is not owned by the sender.
 func (k Keeper) RouteLockedBalancerToConcentratedMigration(ctx sdk.Context, sender sdk.AccAddress, lockId uint64, sharesToMigrate sdk.Coin, tokenOutMins sdk.Coins) (positionId uint64, amount0, amount1 sdk.Int, liquidity sdk.Dec, joinTime time.Time, poolIdLeaving, poolIdEntering, concentratedLockId uint64, err error) {
-	synthLocksBeforeMigration, migrationType, err := k.routeMigration(ctx, sender, lockId, sharesToMigrate)
+	synthLockBeforeMigration, migrationType, err := k.routeMigration(ctx, sender, lockId, sharesToMigrate)
 	if err != nil {
 		return 0, sdk.Int{}, sdk.Int{}, sdk.Dec{}, time.Time{}, 0, 0, 0, err
 	}
 
 	switch migrationType {
 	case SuperfluidBonded:
-		positionId, amount0, amount1, liquidity, joinTime, concentratedLockId, poolIdLeaving, poolIdEntering, err = k.migrateSuperfluidBondedBalancerToConcentrated(ctx, sender, lockId, sharesToMigrate, synthLocksBeforeMigration[0].SynthDenom, tokenOutMins)
+		positionId, amount0, amount1, liquidity, joinTime, concentratedLockId, poolIdLeaving, poolIdEntering, err = k.migrateSuperfluidBondedBalancerToConcentrated(ctx, sender, lockId, sharesToMigrate, synthLockBeforeMigration.SynthDenom, tokenOutMins)
 	case SuperfluidUnbonding:
-		positionId, amount0, amount1, liquidity, joinTime, concentratedLockId, poolIdLeaving, poolIdEntering, err = k.migrateSuperfluidUnbondingBalancerToConcentrated(ctx, sender, lockId, sharesToMigrate, synthLocksBeforeMigration[0].SynthDenom, tokenOutMins)
+		positionId, amount0, amount1, liquidity, joinTime, concentratedLockId, poolIdLeaving, poolIdEntering, err = k.migrateSuperfluidUnbondingBalancerToConcentrated(ctx, sender, lockId, sharesToMigrate, synthLockBeforeMigration.SynthDenom, tokenOutMins)
 	case NonSuperfluid:
 		positionId, amount0, amount1, liquidity, joinTime, concentratedLockId, poolIdLeaving, poolIdEntering, err = k.migrateNonSuperfluidLockBalancerToConcentrated(ctx, sender, lockId, sharesToMigrate, tokenOutMins)
+	case Unlocked:
+		positionId, amount0, amount1, liquidity, joinTime, poolIdLeaving, poolIdEntering, err = k.gk.MigrateUnlockedPositionFromBalancerToConcentrated(ctx, sender, sharesToMigrate, tokenOutMins)
+		concentratedLockId = 0
 	default:
 		return 0, sdk.Int{}, sdk.Int{}, sdk.Dec{}, time.Time{}, 0, 0, 0, fmt.Errorf("unsupported migration type")
 	}
@@ -207,23 +211,27 @@ func (k Keeper) migrateNonSuperfluidLockBalancerToConcentrated(ctx sdk.Context,
 
 // routeMigration determines the status of the provided lock which is used to determine the method for migration.
 // It also returns the underlying synthetic locks of the provided lock, if any exist.
-func (k Keeper) routeMigration(ctx sdk.Context, sender sdk.AccAddress, lockId uint64, sharesToMigrate sdk.Coin) (synthLocksBeforeMigration []lockuptypes.SyntheticLock, migrationType MigrationType, err error) {
-	synthLocksBeforeMigration = k.lk.GetAllSyntheticLockupsByLockup(ctx, lockId)
-	if len(synthLocksBeforeMigration) > 1 {
-		return nil, Unsupported, fmt.Errorf("lock %d contains more than one synthetic lock", lockId)
+func (k Keeper) routeMigration(ctx sdk.Context, sender sdk.AccAddress, lockId uint64, sharesToMigrate sdk.Coin) (synthLockBeforeMigration lockuptypes.SyntheticLock, migrationType MigrationType, err error) {
+	if lockId == 0 {
+		return lockuptypes.SyntheticLock{}, Unlocked, nil
 	}
 
-	if len(synthLocksBeforeMigration) == 0 {
+	synthLockBeforeMigration, err = k.lk.GetSyntheticLockupByUnderlyingLockId(ctx, lockId)
+	if err != nil {
+		return lockuptypes.SyntheticLock{}, Unsupported, err
+	}
+
+	if synthLockBeforeMigration == (lockuptypes.SyntheticLock{}) {
 		migrationType = NonSuperfluid
-	} else if strings.Contains(synthLocksBeforeMigration[0].SynthDenom, "superbonding") {
+	} else if strings.Contains(synthLockBeforeMigration.SynthDenom, "superbonding") {
 		migrationType = SuperfluidBonded
-	} else if strings.Contains(synthLocksBeforeMigration[0].SynthDenom, "superunbonding") {
+	} else if strings.Contains(synthLockBeforeMigration.SynthDenom, "superunbonding") {
 		migrationType = SuperfluidUnbonding
 	} else {
-		return nil, Unsupported, fmt.Errorf("lock %d contains an unsupported synthetic lock", lockId)
+		return lockuptypes.SyntheticLock{}, Unsupported, fmt.Errorf("lock %d contains an unsupported synthetic lock", lockId)
 	}
 
-	return synthLocksBeforeMigration, migrationType, nil
+	return synthLockBeforeMigration, migrationType, nil
 }
 
 // validateMigration performs validation for the migration of gamm LP tokens from a Balancer pool to the canonical Concentrated pool. It performs the following steps:

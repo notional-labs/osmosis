@@ -3,8 +3,8 @@ package keeper
 import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	poolmanagertypes "github.com/osmosis-labs/osmosis/v15/x/poolmanager/types"
-	"github.com/osmosis-labs/osmosis/v15/x/protorev/types"
+	poolmanagertypes "github.com/osmosis-labs/osmosis/v16/x/poolmanager/types"
+	"github.com/osmosis-labs/osmosis/v16/x/protorev/types"
 )
 
 // IterateRoutes checks the profitability of every single route that is passed in
@@ -222,9 +222,9 @@ func (k Keeper) ExecuteTrade(ctx sdk.Context, route poolmanagertypes.SwapAmountI
 		return err
 	}
 
-	// Update the developer fees
-	if err = k.UpdateDeveloperFees(ctx, inputCoin.Denom, profit); err != nil {
-		return err
+	// Send the developer fee to the developer address
+	if err := k.SendDeveloperFee(ctx, sdk.NewCoin(inputCoin.Denom, profit)); err != nil {
+		ctx.Logger().Error("failed to send developer fee", "error", err)
 	}
 
 	// Create and emit the backrun event and add it to the context

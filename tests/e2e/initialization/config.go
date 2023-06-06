@@ -18,19 +18,20 @@ import (
 	"github.com/gogo/protobuf/proto"
 	tmjson "github.com/tendermint/tendermint/libs/json"
 
-	"github.com/osmosis-labs/osmosis/v15/x/gamm/pool-models/balancer"
-	gammtypes "github.com/osmosis-labs/osmosis/v15/x/gamm/types"
-	incentivestypes "github.com/osmosis-labs/osmosis/v15/x/incentives/types"
-	minttypes "github.com/osmosis-labs/osmosis/v15/x/mint/types"
-	poolitypes "github.com/osmosis-labs/osmosis/v15/x/pool-incentives/types"
-	poolmanagertypes "github.com/osmosis-labs/osmosis/v15/x/poolmanager/types"
-	twaptypes "github.com/osmosis-labs/osmosis/v15/x/twap/types"
-	txfeestypes "github.com/osmosis-labs/osmosis/v15/x/txfees/types"
+	"github.com/osmosis-labs/osmosis/v16/x/gamm/pool-models/balancer"
+	gammtypes "github.com/osmosis-labs/osmosis/v16/x/gamm/types"
+	incentivestypes "github.com/osmosis-labs/osmosis/v16/x/incentives/types"
+	minttypes "github.com/osmosis-labs/osmosis/v16/x/mint/types"
+	poolitypes "github.com/osmosis-labs/osmosis/v16/x/pool-incentives/types"
+	poolmanagertypes "github.com/osmosis-labs/osmosis/v16/x/poolmanager/types"
+	protorevtypes "github.com/osmosis-labs/osmosis/v16/x/protorev/types"
+	twaptypes "github.com/osmosis-labs/osmosis/v16/x/twap/types"
+	txfeestypes "github.com/osmosis-labs/osmosis/v16/x/txfees/types"
 	epochtypes "github.com/osmosis-labs/osmosis/x/epochs/types"
 
 	types1 "github.com/cosmos/cosmos-sdk/codec/types"
 
-	"github.com/osmosis-labs/osmosis/v15/tests/e2e/util"
+	"github.com/osmosis-labs/osmosis/v16/tests/e2e/util"
 )
 
 // NodeConfig is a confiuration for the node supplied from the test runner
@@ -296,6 +297,11 @@ func initGenesis(chain *internalChain, votingPeriod, expeditedVotingPeriod time.
 		return err
 	}
 
+	err = updateModuleGenesis(appGenState, protorevtypes.ModuleName, &protorevtypes.GenesisState{}, updateProtorevGenesis)
+	if err != nil {
+		return err
+	}
+
 	bz, err := json.MarshalIndent(appGenState, "", "  ")
 	if err != nil {
 		return err
@@ -535,6 +541,10 @@ func updateGenUtilGenesis(c *internalChain) func(*genutiltypes.GenesisState) {
 		}
 		genUtilGenState.GenTxs = genTxs
 	}
+}
+
+func updateProtorevGenesis(protorevGenState *protorevtypes.GenesisState) {
+	protorevGenState.DeveloperAddress = "osmo1qs9akhf0s05hqskmu9gdnzz3e6u4xc7aaya0u0"
 }
 
 func setDenomMetadata(genState *banktypes.GenesisState, denom string) {

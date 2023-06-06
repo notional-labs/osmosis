@@ -11,9 +11,9 @@ import (
 
 	"github.com/osmosis-labs/osmosis/osmomath"
 	"github.com/osmosis-labs/osmosis/osmoutils"
-	appParams "github.com/osmosis-labs/osmosis/v15/app/params"
-	lockuptypes "github.com/osmosis-labs/osmosis/v15/x/lockup/types"
-	"github.com/osmosis-labs/osmosis/v15/x/valset-pref/types"
+	appParams "github.com/osmosis-labs/osmosis/v16/app/params"
+	lockuptypes "github.com/osmosis-labs/osmosis/v16/x/lockup/types"
+	"github.com/osmosis-labs/osmosis/v16/x/valset-pref/types"
 )
 
 type valSet struct {
@@ -353,8 +353,11 @@ func (k Keeper) ForceUnlockBondedOsmo(ctx sdk.Context, lockID uint64, delegatorA
 	}
 
 	// Ensured the lock has no superfluid relation by checking that there are no synthetic locks
-	synthLocks := k.lockupKeeper.GetAllSyntheticLockupsByLockup(ctx, lockID)
-	if len(synthLocks) != 0 {
+	synthLocks, err := k.lockupKeeper.GetSyntheticLockupByUnderlyingLockId(ctx, lockID)
+	if err != nil {
+		return sdk.Coin{}, err
+	}
+	if synthLocks != (lockuptypes.SyntheticLock{}) {
 		return sdk.Coin{}, fmt.Errorf("cannot use DelegateBondedTokens being used for superfluid.")
 	}
 

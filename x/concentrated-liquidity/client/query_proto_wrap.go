@@ -6,9 +6,9 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	cl "github.com/osmosis-labs/osmosis/v15/x/concentrated-liquidity"
-	clquery "github.com/osmosis-labs/osmosis/v15/x/concentrated-liquidity/client/queryproto"
-	"github.com/osmosis-labs/osmosis/v15/x/concentrated-liquidity/model"
+	cl "github.com/osmosis-labs/osmosis/v16/x/concentrated-liquidity"
+	clquery "github.com/osmosis-labs/osmosis/v16/x/concentrated-liquidity/client/queryproto"
+	"github.com/osmosis-labs/osmosis/v16/x/concentrated-liquidity/model"
 )
 
 // Querier defines a wrapper around the x/concentrated-liquidity keeper providing gRPC method
@@ -21,46 +21,35 @@ func NewQuerier(k cl.Keeper) Querier {
 	return Querier{Keeper: k}
 }
 
-// UserPositions returns positions of a specified address
+// UserPositions returns positions of a specified address. Each position is broken down by:
+// - the position itself
+// - the underlying assets
+// - the claimable fees
+// - the claimable incentives
+// - the incentives that would be forfeited if the position was closed now
 func (q Querier) UserPositions(ctx sdk.Context, req clquery.UserPositionsRequest) (*clquery.UserPositionsResponse, error) {
 	sdkAddr, err := sdk.AccAddressFromBech32(req.Address)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	userPositions, err := q.Keeper.GetUserPositions(ctx, sdkAddr, req.PoolId)
+	fullPositions, pageRes, err := q.Keeper.GetUserPositionsSerialized(ctx, sdkAddr, req.PoolId, req.Pagination)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	positions := make([]model.PositionWithUnderlyingAssetBreakdown, 0, len(userPositions))
-
-	for _, position := range userPositions {
-		// get the pool from the position
-		pool, err := q.Keeper.GetConcentratedPoolById(ctx, position.PoolId)
-		if err != nil {
-			return nil, status.Error(codes.Internal, err.Error())
-		}
-
-		asset0, asset1, err := cl.CalculateUnderlyingAssetsFromPosition(ctx, position, pool)
-		if err != nil {
-			return nil, status.Error(codes.Internal, err.Error())
-		}
-
-		// Append the position and underlying assets to the positions slice
-		positions = append(positions, model.PositionWithUnderlyingAssetBreakdown{
-			Position: position,
-			Asset0:   asset0,
-			Asset1:   asset1,
-		})
-	}
-
 	return &clquery.UserPositionsResponse{
-		Positions: positions,
+		Positions:  fullPositions,
+		Pagination: pageRes,
 	}, nil
 }
 
-// PositionById returns a position with the specified id.
+// PositionById returns a position with the specified id. The position is broken down by:
+// - the position itself
+// - the underlying assets
+// - the claimable fees
+// - the claimable incentives
+// - the incentives that would be forfeited if the position was closed now
 func (q Querier) PositionById(ctx sdk.Context, req clquery.PositionByIdRequest) (*clquery.PositionByIdResponse, error) {
 	position, err := q.Keeper.GetPosition(ctx, req.PositionId)
 	if err != nil {
@@ -77,11 +66,24 @@ func (q Querier) PositionById(ctx sdk.Context, req clquery.PositionByIdRequest) 
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
+	claimableSpreadRewards, err := q.Keeper.GetClaimableSpreadRewards(ctx, position.PositionId)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	claimableIncentives, forfeitedIncentives, err := q.Keeper.GetClaimableIncentives(ctx, position.PositionId)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
 	return &clquery.PositionByIdResponse{
-		Position: model.PositionWithUnderlyingAssetBreakdown{
-			Position: position,
-			Asset0:   asset0,
-			Asset1:   asset1,
+		Position: model.FullPositionBreakdown{
+			Position:               position,
+			Asset0:                 asset0,
+			Asset1:                 asset1,
+			ClaimableSpreadRewards: claimableSpreadRewards,
+			ClaimableIncentives:    claimableIncentives,
+			ForfeitedIncentives:    forfeitedIncentives,
 		},
 	}, nil
 }
@@ -156,14 +158,14 @@ func (q Querier) LiquidityNetInDirection(ctx sdk.Context, req clquery.LiquidityN
 	return &clquery.LiquidityNetInDirectionResponse{LiquidityDepths: liquidityDepths, CurrentLiquidity: pool.GetLiquidity(), CurrentTick: pool.GetCurrentTick()}, nil
 }
 
-func (q Querier) ClaimableFees(ctx sdk.Context, req clquery.ClaimableFeesRequest) (*clquery.ClaimableFeesResponse, error) {
-	claimableFees, err := q.Keeper.GetClaimableFees(ctx, req.PositionId)
+func (q Querier) ClaimableSpreadRewards(ctx sdk.Context, req clquery.ClaimableSpreadRewardsRequest) (*clquery.ClaimableSpreadRewardsResponse, error) {
+	ClaimableSpreadRewards, err := q.Keeper.GetClaimableSpreadRewards(ctx, req.PositionId)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	return &clquery.ClaimableFeesResponse{
-		ClaimableFees: claimableFees,
+	return &clquery.ClaimableSpreadRewardsResponse{
+		ClaimableSpreadRewards: ClaimableSpreadRewards,
 	}, nil
 }
 
@@ -176,5 +178,63 @@ func (q Querier) ClaimableIncentives(ctx sdk.Context, req clquery.ClaimableIncen
 	return &clquery.ClaimableIncentivesResponse{
 		ClaimableIncentives: claimableIncentives,
 		ForfeitedIncentives: forfeitedIncentives,
+	}, nil
+}
+
+// PoolAccumulatorRewards returns pool accumulator rewards.
+// It includes global spread reward growth and global uptime growth accumulator values.
+func (q Querier) PoolAccumulatorRewards(ctx sdk.Context, req clquery.PoolAccumulatorRewardsRequest) (*clquery.PoolAccumulatorRewardsResponse, error) {
+	if req.PoolId == 0 {
+		return nil, status.Error(codes.InvalidArgument, "pool id is zero")
+	}
+
+	spreadRewardsAcc, err := q.Keeper.GetSpreadRewardAccumulator(ctx, req.PoolId)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	uptimeAccValues, err := q.Keeper.GetUptimeAccumulatorValues(ctx, req.PoolId)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	uptimeGrowthTrackers := make([]model.UptimeTracker, 0, len(uptimeAccValues))
+	for _, uptimeTrackerValue := range uptimeAccValues {
+		uptimeGrowthTrackers = append(uptimeGrowthTrackers, model.UptimeTracker{UptimeGrowthOutside: uptimeTrackerValue})
+	}
+
+	return &clquery.PoolAccumulatorRewardsResponse{
+		SpreadRewardGrowthGlobal: spreadRewardsAcc.GetValue(),
+		UptimeGrowthGlobal:       uptimeGrowthTrackers,
+	}, nil
+}
+
+func (q Querier) IncentiveRecords(ctx sdk.Context, req clquery.IncentiveRecordsRequest) (*clquery.IncentiveRecordsResponse, error) {
+	anys, pageRes, err := q.Keeper.GetIncentiveRecordSerialized(ctx, req.PoolId, req.Pagination)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	return &clquery.IncentiveRecordsResponse{
+		IncentiveRecords: anys,
+		Pagination:       pageRes,
+	}, nil
+}
+
+// TickAccumulatorTrackers returns tick accumulator trackers.
+// It includes spread reward growth in the opposite direction of last traversal and uptime tracker values.
+func (q Querier) TickAccumulatorTrackers(ctx sdk.Context, req clquery.TickAccumulatorTrackersRequest) (*clquery.TickAccumulatorTrackersResponse, error) {
+	if req.PoolId == 0 {
+		return nil, status.Error(codes.InvalidArgument, "pool id is zero")
+	}
+
+	cacheCtx, _ := ctx.CacheContext()
+	tickInfo, err := q.Keeper.GetTickInfo(cacheCtx, req.PoolId, req.TickIndex)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	return &clquery.TickAccumulatorTrackersResponse{
+		SpreadRewardGrowthOppositeDirectionOfLastTraversal: tickInfo.SpreadRewardGrowthOppositeDirectionOfLastTraversal,
+		UptimeTrackers: tickInfo.UptimeTrackers.List,
 	}, nil
 }

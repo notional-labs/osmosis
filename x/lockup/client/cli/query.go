@@ -18,7 +18,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/osmosis-labs/osmosis/osmoutils/osmocli"
-	"github.com/osmosis-labs/osmosis/v15/x/lockup/types"
+	"github.com/osmosis-labs/osmosis/v16/x/lockup/types"
 )
 
 // GetQueryCmd returns the cli query commands for this module.
@@ -38,11 +38,13 @@ func GetQueryCmd() *cobra.Command {
 		GetCmdAccountUnlockedBeforeTime(),
 		GetCmdAccountLockedPastTimeDenom(),
 		GetCmdLockedByID(),
+		GetCmdLockRewardReceiver(),
 		GetCmdAccountLockedLongerDuration(),
 		GetCmdAccountLockedLongerDurationNotUnlockingOnly(),
 		GetCmdAccountLockedLongerDurationDenom(),
 		GetCmdOutputLocksJson(),
 		GetCmdSyntheticLockupsByLockupID(),
+		GetCmdSyntheticLockupByLockupID(),
 		GetCmdAccountLockedDuration(),
 		GetCmdNextLockID(),
 		osmocli.GetParams[*types.QueryParamsRequest](
@@ -191,6 +193,19 @@ func GetCmdLockedByID() *cobra.Command {
 	return osmocli.BuildQueryCli[*types.LockedRequest](&q, types.NewQueryClient)
 }
 
+// GetCmdLockRewardReceiver returns reward receiver for the given lock id
+func GetCmdLockRewardReceiver() *cobra.Command {
+	q := osmocli.QueryDescriptor{
+		Use:   "lock-reward-receiver <id>",
+		Short: "Query lock's reward receiver",
+		Long: `{{.Short}}{{.ExampleHeader}}
+{{.CommandPrefix}} lock-reward-receiver 1`,
+		QueryFnName: "LockedByID",
+	}
+	q.Long = osmocli.FormatLongDesc(q.Long, osmocli.NewLongMetadata(types.ModuleName).WithShort(q.Short))
+	return osmocli.BuildQueryCli[*types.LockRewardReceiverRequest](&q, types.NewQueryClient)
+}
+
 // GetCmdNextLockID returns next lock id to be created.
 func GetCmdNextLockID() *cobra.Command {
 	return osmocli.SimpleQueryCmd[*types.NextLockIDRequest](
@@ -200,10 +215,19 @@ func GetCmdNextLockID() *cobra.Command {
 }
 
 // GetCmdSyntheticLockupsByLockupID returns synthetic lockups by lockup id.
+// nolint: staticcheck
 func GetCmdSyntheticLockupsByLockupID() *cobra.Command {
 	return osmocli.SimpleQueryCmd[*types.SyntheticLockupsByLockupIDRequest](
 		"synthetic-lockups-by-lock-id <id>",
-		"Query synthetic lockups by lockup id",
+		"Query synthetic lockups by lockup id (is deprecated for synthetic-lockup-by-lock-id)",
+		`{{.Short}}`, types.ModuleName, types.NewQueryClient)
+}
+
+// GetCmdSyntheticLockupByLockupID returns synthetic lockup by lockup id.
+func GetCmdSyntheticLockupByLockupID() *cobra.Command {
+	return osmocli.SimpleQueryCmd[*types.SyntheticLockupByLockupIDRequest](
+		"synthetic-lockup-by-lock-id <id>",
+		"Query synthetic lock by underlying lockup id",
 		`{{.Short}}`, types.ModuleName, types.NewQueryClient)
 }
 

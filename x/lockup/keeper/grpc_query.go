@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/osmosis-labs/osmosis/v15/x/lockup/types"
+	"github.com/osmosis-labs/osmosis/v16/x/lockup/types"
 )
 
 var _ types.QueryServer = Querier{}
@@ -164,6 +164,17 @@ func (q Querier) LockedByID(goCtx context.Context, req *types.LockedRequest) (*t
 	return &types.LockedResponse{Lock: lock}, err
 }
 
+// LockRewardReceiver returns lock reward receiver of the lock.
+func (q Querier) LockRewardReceiver(goCtx context.Context, req *types.LockRewardReceiverRequest) (*types.LockRewardReceiverResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "empty request")
+	}
+
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	rewardReceiver, err := q.Keeper.GetLockRewardReceiver(ctx, req.LockId)
+	return &types.LockRewardReceiverResponse{RewardReceiver: rewardReceiver}, err
+}
+
 // NextLockID returns next lock ID to be created.
 func (q Querier) NextLockID(goCtx context.Context, req *types.NextLockIDRequest) (*types.NextLockIDResponse, error) {
 	if req == nil {
@@ -178,14 +189,33 @@ func (q Querier) NextLockID(goCtx context.Context, req *types.NextLockIDRequest)
 }
 
 // SyntheticLockupsByLockupID returns synthetic lockups by native lockup id.
+// Deprecated: use SyntheticLockupByLockupID instead.
+// nolint: staticcheck
 func (q Querier) SyntheticLockupsByLockupID(goCtx context.Context, req *types.SyntheticLockupsByLockupIDRequest) (*types.SyntheticLockupsByLockupIDResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "empty request")
 	}
 
 	ctx := sdk.UnwrapSDKContext(goCtx)
-	synthLocks := q.Keeper.GetAllSyntheticLockupsByLockup(ctx, req.LockId)
-	return &types.SyntheticLockupsByLockupIDResponse{SyntheticLocks: synthLocks}, nil
+	synthLock, err := q.Keeper.GetSyntheticLockupByUnderlyingLockId(ctx, req.LockId)
+	if err != nil {
+		return nil, err
+	}
+	return &types.SyntheticLockupsByLockupIDResponse{SyntheticLocks: []types.SyntheticLock{synthLock}}, nil
+}
+
+// SyntheticLockupByLockupID returns synthetic lockup by native lockup id.
+func (q Querier) SyntheticLockupByLockupID(goCtx context.Context, req *types.SyntheticLockupByLockupIDRequest) (*types.SyntheticLockupByLockupIDResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "empty request")
+	}
+
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	synthLock, err := q.Keeper.GetSyntheticLockupByUnderlyingLockId(ctx, req.LockId)
+	if err != nil {
+		return nil, err
+	}
+	return &types.SyntheticLockupByLockupIDResponse{SyntheticLock: synthLock}, nil
 }
 
 // AccountLockedLongerDuration returns locks of an account with duration longer than specified.

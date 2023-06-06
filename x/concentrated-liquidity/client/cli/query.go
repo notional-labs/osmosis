@@ -5,8 +5,8 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/osmosis-labs/osmosis/osmoutils/osmocli"
-	"github.com/osmosis-labs/osmosis/v15/x/concentrated-liquidity/client/queryproto"
-	"github.com/osmosis-labs/osmosis/v15/x/concentrated-liquidity/types"
+	"github.com/osmosis-labs/osmosis/v16/x/concentrated-liquidity/client/queryproto"
+	"github.com/osmosis-labs/osmosis/v16/x/concentrated-liquidity/types"
 )
 
 // GetQueryCmd returns the cli query commands for this module.
@@ -14,8 +14,10 @@ func GetQueryCmd() *cobra.Command {
 	cmd := osmocli.QueryIndexCmd(types.ModuleName)
 	osmocli.AddQueryCmd(cmd, queryproto.NewQueryClient, GetCmdPools)
 	osmocli.AddQueryCmd(cmd, queryproto.NewQueryClient, GetUserPositions)
-	osmocli.AddQueryCmd(cmd, queryproto.NewQueryClient, GetClaimableFees)
+	osmocli.AddQueryCmd(cmd, queryproto.NewQueryClient, GetPositionById)
+	osmocli.AddQueryCmd(cmd, queryproto.NewQueryClient, GetClaimableSpreadRewards)
 	osmocli.AddQueryCmd(cmd, queryproto.NewQueryClient, GetClaimableIncentives)
+	osmocli.AddQueryCmd(cmd, queryproto.NewQueryClient, GetIncentiveRecords)
 	cmd.AddCommand(
 		osmocli.GetParams[*queryproto.ParamsRequest](
 			types.ModuleName, queryproto.NewQueryClient),
@@ -35,6 +37,16 @@ func GetUserPositions() (*osmocli.QueryDescriptor, *queryproto.UserPositionsRequ
 		&queryproto.UserPositionsRequest{}
 }
 
+func GetPositionById() (*osmocli.QueryDescriptor, *queryproto.PositionByIdRequest) {
+	return &osmocli.QueryDescriptor{
+			Use:   "position-by-id [positionID]",
+			Short: "Query position by ID",
+			Long: `{{.Short}}{{.ExampleHeader}}
+{{.CommandPrefix}} position-by-id 53`,
+		},
+		&queryproto.PositionByIdRequest{}
+}
+
 func GetCmdPools() (*osmocli.QueryDescriptor, *queryproto.PoolsRequest) {
 	return &osmocli.QueryDescriptor{
 		Use:   "pools",
@@ -44,13 +56,13 @@ func GetCmdPools() (*osmocli.QueryDescriptor, *queryproto.PoolsRequest) {
 	}, &queryproto.PoolsRequest{}
 }
 
-func GetClaimableFees() (*osmocli.QueryDescriptor, *queryproto.ClaimableFeesRequest) {
+func GetClaimableSpreadRewards() (*osmocli.QueryDescriptor, *queryproto.ClaimableSpreadRewardsRequest) {
 	return &osmocli.QueryDescriptor{
-		Use:   "claimable-fees [positionID]",
-		Short: "Query claimable fees",
+		Use:   "claimable-spread-rewards [positionID]",
+		Short: "Query claimable spread rewards",
 		Long: `{{.Short}}{{.ExampleHeader}}
-{{.CommandPrefix}} claimable-fees 53`,
-	}, &queryproto.ClaimableFeesRequest{}
+{{.CommandPrefix}} claimable-spread-rewards 53`,
+	}, &queryproto.ClaimableSpreadRewardsRequest{}
 }
 
 func GetClaimableIncentives() (*osmocli.QueryDescriptor, *queryproto.ClaimableIncentivesRequest) {
@@ -58,6 +70,15 @@ func GetClaimableIncentives() (*osmocli.QueryDescriptor, *queryproto.ClaimableIn
 		Use:   "claimable-incentives [positionID]",
 		Short: "Query claimable incentives",
 		Long: `{{.Short}}{{.ExampleHeader}}
-{{.CommandPrefix}} claimable-fees 53`,
+{{.CommandPrefix}} claimable-incentives 53`,
 	}, &queryproto.ClaimableIncentivesRequest{}
+}
+
+func GetIncentiveRecords() (*osmocli.QueryDescriptor, *queryproto.IncentiveRecordsRequest) {
+	return &osmocli.QueryDescriptor{
+		Use:   "incentive-records [poolId]",
+		Short: "Query incentive records for a given pool",
+		Long: `{{.Short}}{{.ExampleHeader}}
+{{.CommandPrefix}} incentive-records 1`,
+	}, &queryproto.IncentiveRecordsRequest{}
 }

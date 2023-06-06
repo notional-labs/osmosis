@@ -10,18 +10,20 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/stretchr/testify/require"
 
-	"github.com/osmosis-labs/osmosis/v15/app/apptesting"
-	cl "github.com/osmosis-labs/osmosis/v15/x/concentrated-liquidity"
-	clmath "github.com/osmosis-labs/osmosis/v15/x/concentrated-liquidity/math"
-	clmodel "github.com/osmosis-labs/osmosis/v15/x/concentrated-liquidity/model"
-	"github.com/osmosis-labs/osmosis/v15/x/concentrated-liquidity/types"
+	"github.com/osmosis-labs/osmosis/v16/app/apptesting"
+	cl "github.com/osmosis-labs/osmosis/v16/x/concentrated-liquidity"
+	clmath "github.com/osmosis-labs/osmosis/v16/x/concentrated-liquidity/math"
+	clmodel "github.com/osmosis-labs/osmosis/v16/x/concentrated-liquidity/model"
+	"github.com/osmosis-labs/osmosis/v16/x/concentrated-liquidity/types"
+	"github.com/osmosis-labs/osmosis/v16/x/gamm/pool-models/balancer"
+	gammtypes "github.com/osmosis-labs/osmosis/v16/x/gamm/types"
 )
 
 type BenchTestSuite struct {
 	apptesting.KeeperTestHelper
 }
 
-func (s BenchTestSuite) createPosition(accountIndex int, poolId uint64, coin0, coin1 sdk.Coin, lowerTick, upperTick int64) {
+func (s *BenchTestSuite) createPosition(accountIndex int, poolId uint64, coin0, coin1 sdk.Coin, lowerTick, upperTick int64) {
 	tokensDesired := sdk.NewCoins(coin0, coin1)
 
 	_, _, _, _, _, _, _, err := s.App.ConcentratedLiquidityKeeper.CreatePosition(s.Ctx, poolId, s.TestAccs[accountIndex], tokensDesired, sdk.ZeroInt(), sdk.ZeroInt(), lowerTick, upperTick)
@@ -56,13 +58,24 @@ func runBenchmark(b *testing.B, testFunc func(b *testing.B, s *BenchTestSuite, p
 		numberOfPositionsInt = sdk.NewInt(numberOfPositions)
 		maxAmountOfEachToken = sdk.NewInt(maxAmountDeposited).Mul(numberOfPositionsInt)
 		seed                 = int64(1)
+		defaultDenom0Asset   = balancer.PoolAsset{
+			Weight: sdk.NewInt(100),
+			Token:  sdk.NewCoin(denom0, sdk.NewInt(1000000000)),
+		}
+		defaultDenom1Asset = balancer.PoolAsset{
+			Weight: sdk.NewInt(100),
+			Token:  sdk.NewCoin(denom1, sdk.NewInt(1000000000)),
+		}
+		defaultPoolAssets = []balancer.PoolAsset{defaultDenom0Asset, defaultDenom1Asset}
 	)
 
 	rand.Seed(seed)
 
+	b.ResetTimer()
+
 	for i := 0; i < b.N; i++ {
 		s := BenchTestSuite{}
-		s.Setup()
+		cleanup := s.SetupWithLevelDb()
 
 		for _, acc := range s.TestAccs {
 			simapp.FundAccount(s.App.BankKeeper, s.Ctx, acc, sdk.NewCoins(
@@ -72,22 +85,38 @@ func runBenchmark(b *testing.B, testFunc func(b *testing.B, s *BenchTestSuite, p
 			))
 		}
 
-		// Create a pool
-		poolId, err := s.App.PoolManagerKeeper.CreatePool(s.Ctx, clmodel.NewMsgCreateConcentratedPool(
+		// Create a balancer pool
+		gammPoolId, err := s.App.PoolManagerKeeper.CreatePool(s.Ctx, balancer.NewMsgCreateBalancerPool(s.TestAccs[0], balancer.PoolParams{
+			SwapFee: sdk.MustNewDecFromStr("0.001"),
+			ExitFee: sdk.ZeroDec(),
+		}, defaultPoolAssets, ""))
+		noError(b, err)
+
+		// Create a cl pool.
+		clPoolId, err := s.App.PoolManagerKeeper.CreatePool(s.Ctx, clmodel.NewMsgCreateConcentratedPool(
 			s.TestAccs[0], denom0, denom1, tickSpacing, sdk.MustNewDecFromStr("0.001"),
 		))
 		noError(b, err)
 
 		clKeeper := s.App.ConcentratedLiquidityKeeper
+		gammKeeper := s.App.GAMMKeeper
+
+		// Create a link between the balancer and cl pool.
+		record := gammtypes.BalancerToConcentratedPoolLink{BalancerPoolId: gammPoolId, ClPoolId: clPoolId}
+		err = gammKeeper.ReplaceMigrationRecords(s.Ctx, []gammtypes.BalancerToConcentratedPoolLink{record})
+		s.Require().NoError(err)
+
+		_, err = gammKeeper.GetLinkedConcentratedPoolID(s.Ctx, gammPoolId)
+		s.Require().NoError(err)
 
 		// Create first position to set a price of 1 and tick of zero.
 		tokenDesired0 := sdk.NewCoin(denom0, sdk.NewInt(100))
 		tokenDesired1 := sdk.NewCoin(denom1, sdk.NewInt(100))
 		tokensDesired := sdk.NewCoins(tokenDesired0, tokenDesired1)
-		_, _, _, _, _, _, _, err = clKeeper.CreatePosition(s.Ctx, poolId, s.TestAccs[0], tokensDesired, sdk.ZeroInt(), sdk.ZeroInt(), types.MinTick, types.MaxTick)
+		_, _, _, _, _, _, _, err = clKeeper.CreatePosition(s.Ctx, clPoolId, s.TestAccs[0], tokensDesired, sdk.ZeroInt(), sdk.ZeroInt(), types.MinTick, types.MaxTick)
 		noError(b, err)
 
-		pool, err := clKeeper.GetPoolById(s.Ctx, poolId)
+		pool, err := clKeeper.GetPoolById(s.Ctx, clPoolId)
 		noError(b, err)
 
 		// Zero by default, can configure by setting a specific position.
@@ -134,23 +163,26 @@ func runBenchmark(b *testing.B, testFunc func(b *testing.B, s *BenchTestSuite, p
 				tokenDesired1 := sdk.NewCoin(denom1, sdk.NewInt(rand.Int63n(maxAmountDeposited)))
 
 				accountIndex := rand.Intn(len(s.TestAccs))
-				s.createPosition(accountIndex, poolId, tokenDesired0, tokenDesired1, lowerTick, upperTick)
+				s.createPosition(accountIndex, clPoolId, tokenDesired0, tokenDesired1, lowerTick, upperTick)
 			}
 		}
 
+		createPosition := func(lowerTick, upperTick int64) {
+			maxAmountDepositedFullRange := sdk.NewInt(maxAmountDeposited).MulRaw(5)
+			tokenDesired0 := sdk.NewCoin(denom0, maxAmountDepositedFullRange)
+			tokenDesired1 := sdk.NewCoin(denom1, maxAmountDepositedFullRange)
+			tokensDesired := sdk.NewCoins(tokenDesired0, tokenDesired1)
+			accountIndex := rand.Intn(len(s.TestAccs))
+			account := s.TestAccs[accountIndex]
+			simapp.FundAccount(s.App.BankKeeper, s.Ctx, account, tokensDesired)
+			s.createPosition(accountIndex, clPoolId, tokenDesired0, tokenDesired1, lowerTick, upperTick)
+		}
 		// Setup numberOfPositions full range positions for deeper liquidity.
 		setupFullRangePositions := func() {
 			for i := 0; i < numberOfPositions; i++ {
 				lowerTick := types.MinTick
 				upperTick := types.MaxTick
-				maxAmountDepositedFullRange := sdk.NewInt(maxAmountDeposited).MulRaw(5)
-				tokenDesired0 := sdk.NewCoin(denom0, maxAmountDepositedFullRange)
-				tokenDesired1 := sdk.NewCoin(denom1, maxAmountDepositedFullRange)
-				tokensDesired := sdk.NewCoins(tokenDesired0, tokenDesired1)
-				accountIndex := rand.Intn(len(s.TestAccs))
-				account := s.TestAccs[accountIndex]
-				simapp.FundAccount(s.App.BankKeeper, s.Ctx, account, tokensDesired)
-				s.createPosition(accountIndex, poolId, tokenDesired0, tokenDesired1, lowerTick, upperTick)
+				createPosition(lowerTick, upperTick)
 			}
 		}
 
@@ -162,13 +194,7 @@ func runBenchmark(b *testing.B, testFunc func(b *testing.B, s *BenchTestSuite, p
 				for i := 0; i < numberOfPositions; i++ {
 					lowerTick := currentTick - 10
 					upperTick := currentTick + 10
-					tokenDesired0 := sdk.NewCoin(denom0, sdk.NewInt(maxAmountDeposited).MulRaw(5))
-					tokenDesired1 := sdk.NewCoin(denom1, sdk.NewInt(maxAmountDeposited).MulRaw(5))
-					tokensDesired := sdk.NewCoins(tokenDesired0, tokenDesired1)
-					accountIndex := rand.Intn(len(s.TestAccs))
-					account := s.TestAccs[accountIndex]
-					simapp.FundAccount(s.App.BankKeeper, s.Ctx, account, tokensDesired)
-					s.createPosition(accountIndex, poolId, tokenDesired0, tokenDesired1, lowerTick, upperTick)
+					createPosition(lowerTick, upperTick)
 				}
 			}
 
@@ -178,13 +204,7 @@ func runBenchmark(b *testing.B, testFunc func(b *testing.B, s *BenchTestSuite, p
 				upperTick := currentTick + 100
 				lowerTick = lowerTick + (tickSpacing - lowerTick%tickSpacing)
 				upperTick = upperTick - upperTick%tickSpacing
-				tokenDesired0 := sdk.NewCoin(denom0, sdk.NewInt(maxAmountDeposited).MulRaw(5))
-				tokenDesired1 := sdk.NewCoin(denom1, sdk.NewInt(maxAmountDeposited).MulRaw(5))
-				tokensDesired := sdk.NewCoins(tokenDesired0, tokenDesired1)
-				accountIndex := rand.Intn(len(s.TestAccs))
-				account := s.TestAccs[accountIndex]
-				simapp.FundAccount(s.App.BankKeeper, s.Ctx, account, tokensDesired)
-				s.createPosition(accountIndex, poolId, tokenDesired0, tokenDesired1, lowerTick, upperTick)
+				createPosition(lowerTick, upperTick)
 			}
 		}
 
@@ -198,9 +218,11 @@ func runBenchmark(b *testing.B, testFunc func(b *testing.B, s *BenchTestSuite, p
 
 		swapAmountIn := sdk.MustNewDecFromStr(amountIn).TruncateInt()
 		largeSwapInCoin := sdk.NewCoin(denomIn, swapAmountIn)
+		// Commit so that the changes are propagated to IAVL.
+		s.Commit()
 
 		testFunc(b, &s, pool, largeSwapInCoin, currentTick)
-
+		cleanup()
 	}
 }
 
