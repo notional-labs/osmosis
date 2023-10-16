@@ -9,7 +9,8 @@ import (
 
 	types "github.com/cosmos/cosmos-sdk/types"
 	gomock "github.com/golang/mock/gomock"
-	types0 "github.com/osmosis-labs/osmosis/v16/x/poolmanager/types"
+	osmomath "github.com/osmosis-labs/osmosis/osmomath"
+	types0 "github.com/osmosis-labs/osmosis/v20/x/poolmanager/types"
 )
 
 // MockPoolI is a mock of PoolI interface.
@@ -33,6 +34,20 @@ func NewMockPoolI(ctrl *gomock.Controller) *MockPoolI {
 // EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockPoolI) EXPECT() *MockPoolIMockRecorder {
 	return m.recorder
+}
+
+// AsSerializablePool mocks base method.
+func (m *MockPoolI) AsSerializablePool() types0.PoolI {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AsSerializablePool")
+	ret0, _ := ret[0].(types0.PoolI)
+	return ret0
+}
+
+// AsSerializablePool indicates an expected call of AsSerializablePool.
+func (mr *MockPoolIMockRecorder) AsSerializablePool() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AsSerializablePool", reflect.TypeOf((*MockPoolI)(nil).AsSerializablePool))
 }
 
 // GetAddress mocks base method.
@@ -64,10 +79,10 @@ func (mr *MockPoolIMockRecorder) GetId() *gomock.Call {
 }
 
 // GetSpreadFactor mocks base method.
-func (m *MockPoolI) GetSpreadFactor(ctx types.Context) types.Dec {
+func (m *MockPoolI) GetSpreadFactor(ctx types.Context) osmomath.Dec {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetSpreadFactor", ctx)
-	ret0, _ := ret[0].(types.Dec)
+	ret0, _ := ret[0].(osmomath.Dec)
 	return ret0
 }
 
@@ -130,10 +145,10 @@ func (mr *MockPoolIMockRecorder) Reset() *gomock.Call {
 }
 
 // SpotPrice mocks base method.
-func (m *MockPoolI) SpotPrice(ctx types.Context, quoteAssetDenom, baseAssetDenom string) (types.Dec, error) {
+func (m *MockPoolI) SpotPrice(ctx types.Context, quoteAssetDenom, baseAssetDenom string) (osmomath.BigDec, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "SpotPrice", ctx, quoteAssetDenom, baseAssetDenom)
-	ret0, _ := ret[0].(types.Dec)
+	ret0, _ := ret[0].(osmomath.BigDec)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

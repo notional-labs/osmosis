@@ -58,7 +58,7 @@ $$y = L \sqrt P$$
 Note the square root around price. By tracking it this way, we can utilize the
 following core property of the architecture:
 
-$$L = \Delta Y / \Delta \sqrt P$$
+$$L = \Delta y / \Delta \sqrt P$$
 
 Since only one of the following changes at a time:
 
@@ -141,7 +141,7 @@ This goes on in the negative direction until it reaches a spot price of
 price of 100000000000000000000000000000000000000.
 
 The minimum spot price was chosen as this is the smallest possible number
-supported by the sdk.Dec type. As for the maximum spot price, the above number
+supported by the osmomath.Dec type. As for the maximum spot price, the above number
 was based on gamm's max spot price of 340282366920938463463374607431768211455.
 While these numbers are not the same, the max spot price used in concentrated
 liquidity utilizes the same number of significant figures as gamm's max spot
@@ -595,7 +595,7 @@ and token1 as a result the one that had higher liquidity will end up smaller
 than originally given by the user.
 
 Note that the liquidity used here does not represent an amount of a specific
-token, but the liquidity of the pool itself, represented in `sdk.Dec`.
+token, but the liquidity of the pool itself, represented in `osmomath.Dec`.
 
 Using the provided liquidity, now we calculate the delta amount of both token0
 and token1, using the following equations, where L is the liquidity calculated above:
@@ -615,7 +615,7 @@ position for a given tick, the API in the keeper layer would look like the follo
 
 ```go
 ctx sdk.Context, poolId uint64, owner sdk.AccAddress, amount0Desired,
-amount1Desired, amount0Min, amount1Min sdk.Int,
+amount1Desired, amount0Min, amount1Min osmomath.Int,
 lowerTick, upperTick int64, frozenUntil time.Time
 func createPosition(
     ctx sdk.Context,
@@ -624,9 +624,9 @@ func createPosition(
     amount0Desired,
     amount1Desired,
     amount0Min,
-    amount1Min sdk.Int
+    amount1Min osmomath.Int
     lowerTick,
-    upperTick int64) (amount0, amount1 sdk.Int, sdk.Dec, error) {
+    upperTick int64) (amount0, amount1 osmomath.Int, osmomath.Dec, error) {
         ...
 }
 ```
@@ -650,8 +650,8 @@ func (k Keeper) withdrawPosition(
     lowerTick,
     upperTick int64,
     frozenUntil time.Time,
-    requestedLiquidityAmountToWithdraw sdk.Dec)
-    (amtDenom0, amtDenom1 sdk.Int, err error) {
+    requestedLiquidityAmountToWithdraw osmomath.Dec)
+    (amtDenom0, amtDenom1 osmomath.Int, err error) {
     ...
 }
 ```
@@ -774,32 +774,32 @@ type SwapState struct {
  // if in given out, amount of token being swapped out.
  // Initialized to the amount of the token specified by the user.
  // Updated after every swap step.
- amountSpecifiedRemaining sdk.Dec
+ amountSpecifiedRemaining osmomath.Dec
 
  // Amount of the other token that is calculated from the specified token.
  // if out given in, amount of token swapped out.
  // if in given out, amount of token swapped in.
  // Initialized to zero.
  // Updated after every swap step.
- amountCalculated sdk.Dec
+ amountCalculated osmomath.Dec
 
  // Current sqrt price while calculating swap.
  // Initialized to the pool's current sqrt price.
  // Updated after every swap step.
- sqrtPrice sdk.Dec
+ sqrtPrice osmomath.Dec
  // Current tick while calculating swap.
  // Initialized to the pool's current tick.
  // Updated each time a tick is crossed.
- tick sdk.Int
+ tick osmomath.Int
  // Current liqudiity within the active tick.
  // Initialized to the pool's current tick's liquidity.
  // Updated each time a tick is crossed.
- liquidity sdk.Dec
+ liquidity osmomath.Dec
 
  // Global spread reward growth per-current swap.
  // Initialized to zero.
  // Updated after every swap step.
- spreadRewardGrowthGlobal sdk.Dec
+ spreadRewardGrowthGlobal osmomath.Dec
 }
 ```
 
@@ -871,6 +871,115 @@ Then, we either proceed to the next swap step or finalize the swap.
 
 Once the swap is completed, we persiste the swap state to the global state
 (if mutative action is performed) and return the `amountCalculated` to the user.
+
+## Liquidity depths calculation
+
+### Calculating liquidity for buckets
+Each bucket (the area between two initialized ticks) contains ceratin amount of liquidity. The liquidity amount can be obtained through `GetTickLiquidityNetInDirection` query. `GetTickLiquidityNetInDirection` returns two results:
+- `expectedStartTickLiquidity` which is the global liquidity, the cumulative liquidity from the bucket of the current price
+- `expectedLiquidityDepths` which is list of liquidity deltas for each and every initialized tick for the full price range in a certain direction that should be cumulatively added to or subtracted starting from the global liquidity in order to get the liquidity for an arbitrary range.
+
+Querying in two different directions is possible, one being 'one for zero', which is in the direction of max tick, the other direction being 'zero for one', which is in the direction of min tick.
+
+If the direction is zero for one, the liquidity for a bucket in tick can be calculated as follows: L<sub>t</sub> = L<sub>t-1</sub> - ΔL<sub>t</sub>, t=1,2, ...
+
+If the direction is one for zero, the liquidity for the bucket in the designated tick can be calculated as follows: L<sub>t</sub> = L<sub>t-1</sub> + ΔL<sub>t</sub>, t=1,2
+
+where L<sub>0</sub> is the global(cumulative liquidity).
+
+### Deducing the quantity of tokens X and Y for a tick range
+Having obtained the liquidity depths for each liquidity buckets in the pool, we can derive an equation to calculate the quantity of each token locked for a certain price range. Let *i* and *j* be the indexes of lower and upper tick boundaries of the range we want to calculate, let P<sub>0</sub> be current price and P<sub>a</sub>, P<sub>b</sub> prices for lower tick and upper tick respectively, where P<sub>a</sub>, P<sub>b</sub> are defined as the following:
+<p align="center"> 
+P<sub>a</sub> = 1.0001<sup>i</sup>, P<sub>b</sub> = 1.0001<sup>j</sup>
+</p>
+
+Let *L* be the total liquidity locked within price range [P<sub>a</sub>, P<sub>b</sub>]. The real reserve curve with liquidity *L*  is:
+
+$(x + \frac{L}{\sqrt{P_b}})(y + L\sqrt{P_a}) = L^2$
+
+Given the amount of liquidity, the quantity of tokens available in the price range [P<sub>a</sub>, P<sub>b</sub>] can be derived as follows:
+
+- If $P_0 \leq P_a$:
+$x = L \left(\frac{1}{\sqrt{P_a}} - \frac{1}{\sqrt{P_b}}\right)$
+$y = 0$
+
+- If $P_0 \geq P_b$:
+$x = 0$
+$y = L \left(\sqrt{P_b} - \sqrt{P_a}\right)$
+
+- If $P_0 \in (P_a, P_b)$:
+$x = L \left(\frac{1}{{\sqrt{P_0}}} - \frac{1}{{\sqrt{P_b}}}\right)$
+$y = L \left(\sqrt{P_0} - \sqrt{P_a}\right)$
+
+This can be written as: 
+
+$x = L \left(\frac{1}{\sqrt{z}} - \frac{1}{\sqrt{P_b}}\right)$ 
+
+$y = L \left(\sqrt{z} - \sqrt{P_a}\right)$
+
+where:
+
+$z = P_a \quad \forall \quad P \leq P_a$  
+$z = P_0 \quad \forall \quad P \in (P_a, P_b)$  
+$z = P_b \quad \forall \quad P \geq P_b$  
+
+### Calculating Pool Depths
+Pool depths here refers to the token required to shift the pool price to a certain tick.
+
+Let i<sub>0</sub> be the integer index identifying a current tick (this is the tick that corresponds to the square root of the current price). Let δ be the desired depth level and d be the associated change in ticks such that 
+
+$\delta = \frac{P_1}{P_0} - 1 = \frac{1.0001^{(i_0 + d)}}{1.0001^{i_0}} - 1$
+
+The change in ticks $d$ can be found as follows:
+
+$d = \log_{1.0001}(\delta + 1)$
+
+e.g. $d = -513$ for $\delta = -5\%$
+
+Note that as the current price formally belongs only to the first range [s<sub>0</sub>, s<sub>1</sub>] or [s<sub>1</sub>, s<sub>0</sub>], where s<sub>0</sub> is the left (when the price grows) or the right (when the price drops) boundary of the current liquidity segment (segment that contains the current price). Mathematically, as we always start calculations from the current price, when recovering the token amounts, all ranges contain only one of the tokens (X or Y depending on the direction of the price change). When swapping, one of the tokens is exchanged for the token being sold. We need to find how much we can swap until the price reaches a certain level.
+
+The Pool Depths expressed in units of asset X or Y in calculated as follows:
+
+$Depth_{x}(\delta) = \sum_{i=0}^{n}x_{i}$
+$Depth_{y}(\delta) = \sum_{i=0}^{n}y_{i}$
+
+where:
+$x_i = L_i \left(\frac{1}{\sqrt{P_{a}(i)}} - \frac{1}{\sqrt{P_{b}(i)}}\right), i = 0, \dots, n$
+
+$y_i = L_i \left(\sqrt{P_{b}(i)} - \sqrt{P_{a}(i)}\right), i = 0, \dots, n$
+
+### Calculating Liquidator Depths
+Liquidator Depth refers to the real price slippage, the real price slippage (average execution price in relation to the current price) from the liquidator's point of view. That is, the amount of tokens that can be liquidated so that the real price slippage does not exceed certain level.
+
+The idea to determine the depth is to swap the maximum possible amount per each liquidity segment until a realized slippage doesn’t exceed a desired level. For the last segment the procedure is repeated per tick until the desired realized slippage is achieved.
+Maximum token amounts that can be locked within each segment or tick (and exchanged for another token when the price crosses the ticks) can be derived as follows:
+
+$x_i = L_i \left(\frac{1}{\sqrt{P_{a}(i)}} - \frac{1}{\sqrt{P_{b}(i)}}\right)$
+
+$y_i = L_i \left(\sqrt{P_{b}(i)} - \sqrt{P_{a}(i)}\right)$
+
+Starting from the current tick *i<sub>0</sub>*  and swapping one token for another one, the average execution price at the end of each tick *i*  can be determined as follows:
+
+$P_i = \frac{(Y_{i-1} + y_i)}{X_{i-1} + x}, \quad i = i_0, \ldots, i_N$
+
+$Y_i = Y_{i-1} + y_i, \quad Y_0 = 0$
+
+$X_i = X_{i-1} + x_i, \quad X_0 = 0$
+
+The slippage equals to:
+
+$Slippage_i = P_i - P_0 - 1$
+
+The algorithm to determine the depth is then the following:
+
+Calculate $X_i$ and $Y_i$ while $|Slippage_i| \leq \delta$ at some $i = N$
+
+Then 
+
+$Depth_x (\delta) = X_N$
+
+$Depth_y (\delta) = Y_N$
+
 
 ## Migration
 
@@ -1115,7 +1224,7 @@ layers of state:
 // Note that this is proto-generated.
 type Pool struct {
     ...
-    SpreadFactor sdk.Dec
+    SpreadFactor osmomath.Dec
 }
 ```
 
@@ -1243,6 +1352,92 @@ func (k Keeper) collectSpreadRewards(
 ```
 
 This returns the amount of spread rewards collected by the user.
+
+## Interval Accumulation
+
+Section pre-face: interval accumulation for incentives functions
+similarly to the spread rewards. However, we focus on spread rewards only for brevity.
+
+As mentioned in the previous sections, to collect spread rewards,
+we utilize a rewards accumulator abstraction with an interval accumulation extension.
+
+The accumulator abstraction can be summarized by the following bullet points:
+- accumulator values are per-share
+- per-pool-global ever-increasing accumulator
+- each position takes a snapshot of the accumulator at the time of creation
+- assume t' represents the time of claiming rewards and t represents the time of position's snapshot of
+the global accumulator. Then, the total position's rewards are equal to
+`(global accumulator at time t' - position snapshot at time t) * number of shares
+
+Interval accumulation further extends this abstraction where positions only accumulate the rewards whenever they are active.
+That is, the current tick is within the position's range.
+
+To calculate that, we utilize tick accumulators. Each tick accumulator is updated whenever it is crossed. It can be thought
+of as having the snapshot of the global accumulator when going in the opposite direction of the last traversal. For example, assume that
+we are reasoning about the snapshot value of tick 100 when the current tick is 150. Then, we know that the value of the tick is 100
+contains rewards accrued before crossing tick 100 when going from the left to the right.
+
+Fundamentally, our base accumulator abstraction changes to the following:
+- accumulator values are per-share (still the same)
+- per-pool-global ever-increasing accumulator (still the same)
+- each position takes a snapshot of the rewards accumulated while the position is active at the time of its creation (as defined by tick accumulator snapshots) (changed)
+- assume t' represents the time of claiming rewards and t represents the time of the position's snapshot of the interval accumulation.
+Then, the total position's rewards are equal to `(global accumulator at time t' - interval accumulation outside at time t' - interval accumulation inside at time t) * number of shares
+Essentially, this gives us interval accumulation inside between times t and t' for each share of the position.
+
+By convention, we initialize the tick snapshot to either:
+a) 0 if the current tick is < tick
+b) global accumulator value if the current tick is >= tick
+
+This is done to ensure that the tick accumulator always contains the rewards accrued before crossing the tick from left to right.
+
+Since tick accumulator snapshots are initialized at different times, their comparison is not meaningful.
+
+By having tick snapshots at each edge of the position and a global value, we can compute how many rewards are accrued inside
+the position. It accounts for all rewards accrued between position creation and the time of claiming rewards whenever the following
+is true:
+`lower tick <= current tick < upper tick``
+
+For this reason, there are 3 ways to compute the rewards accrued inside the position:
+1. current tick is below the position's range (current tick < lower tick)
+- Then, we compute rewards as `lower tick snapshot - upper tick snapshot`
+2. current tick is within the position's range (lower tick <= current tick < upper tick)
+- Then, we compute rewards as `global accumulator - upper tick snapshot - lower tick snapshot`
+3. current tick is above the position's range (current tick >= upper tick)
+- Then, we compute rewards as `upper tick accumulator - lower tick accumulator`
+
+### Negative Interval Accumulation Edge Case Behavior
+
+Case 1: Initialize lower tick snapshot to be greater than upper tick snapshot when current tick > upper tick
+
+Note, that if we initialize the lower tick after the upper tick is already initialized,
+for example, by another position, this might lead to negative accumulation inside
+the interval. This is only possible if the current tick is greater than the lower tick
+that is being initialized.
+
+The reason is that we initialize the lower tick accumulator to the global accumulator
+if the current tick >= tick. As a result, when subtracting the lower tick snapshot from the upper,
+the lower one is greater than or equal to the upper.
+
+This is not an issue because it gets canceled out by the "interval accumulation outside at time t'" that is added to
+the "interval accumulation inside at time t" before being subtracted from the global accumulator at the time of claiming.
+
+Perhaps even more importantly, as long as the _change_ in interval accumulation is tracked correctly, the initial value should not make a difference.
+
+Interestingly, this edge case should not be possible in the other direction. That is, we cannot get negative
+interval accumulation inside if the upper is initialized after the lower and the current tick is less than the upper tick.
+The reason is that if the current tick is less than the tick we initialize, the snapshot becomes 0 by convention.
+As a result, the subtraction from the global accumulator for computing interval accumulation never leads to a
+negative value.
+
+Case 2: Initialize lower tick snapshot to be zero while upper tick snapshot to be non-zero when current tick < lower tick
+
+Assume that initially current tick > upper tick and the upper tick gets initialized by some position.
+Then, its accumulator snapshot is set to the global accumulator. Now, assume that the current tick
+moves under the future position's lower tick. Then, the position gets initialized.
+
+As a result, the lower tick is set to 0, and interval accumulation is
+`lower tick snapshot - upper tick snapshot = 0 - positive value = negative value`
 
 ## Swaps
 
@@ -1413,6 +1608,18 @@ that has been in the pool for the required amount of time qualifies for claiming
 
 While it is technically possible for Osmosis to enable the creation of incentive records directly in the CL module, incentive creation is currently funneled through existing gauge infrastructure in the `x/incentives` module. This simplifies UX drastically for frontends, external incentive creators, and governance, while making CL incentives fully backwards-compatible with incentive creation and querying flows that everyone is already used to. As of the initial version of Osmosis's CL, all incentive creation and querying logic will be handled by respective gauge functions (e.g. the `IncentivizedPools` query in the `x/incentives` module will include CL pools that have internal incentives on them).
 
+To create a gauge dedicated to the concentrated liquidity pool, run a `MsgCreateGauge` message in the `x/incentives` module with the following parameter constraints:
+- `PoolId`: The ID of the CL pool to create a gauge for.
+- `DistrTo.LockQueryType` must be set to `locktypes.LockQueryType.NoLock`
+- `DistrTo.Denom` must be an empty string.
+
+The rest of the parameters can be set according to the desired configuration of the gauge. Please read the `x/incentives` module documentation for more information on how to configure gauges.
+
+Note, that the created gauge will start emitting at the first epoch after the given `StartTime`. During the epoch, a `x/concentrated-liquidity`
+module `IncentiveRecord` will be created for every denom in the gauge. This incentive record will be configured to emit all given incentives
+over the period of an epoch. If the gauge is non-perpetual (emits over several epochs), the distribution will be split evenly between the epochs.
+and a new `IncentiveRecord` will be created for each denom every epoch with the emission rate and token set to finish emitting at the end of the epoch.
+
 ### Reward Splitting Between Classic and CL pools
 
 While we want to nudge Classic pool LPs to transition to CL pools, we also want to ensure that we do not have a hard cutoff for incentives where past a certain point it is no longer worth it to provide liquidity to Classic pools. This is because we want to ensure that we have a healthy transition period where liquidity is not split between Classic and CL pools, but rather that liquidity is added to CL pools while Classic pools are slowly drained of liquidity.
@@ -1559,17 +1766,182 @@ The following are the state entries (key and value pairs) stored for the concent
 Note that for storing ticks, we use 9 bytes instead of directly using uint64, first byte being reserved for the Negative / Positive prefix, and the remaining 8 bytes being reserved for the tick itself, which is of uint64. Although we directly store signed integers as values, we use the first byte to indicate and re-arrange tick indexes from negative to positive.
 
 
+## State and Keys
+
+### Incentive Records
+
+- `KeyIncentiveRecord`
+
+`0x04|` || `string encoding of pool ID` || `|` || `string encoding of min uptime index` || `|` || `string encoding of incentive ID`
+
+Note that the reason for having pool ID and min uptime index is so that we can retrieve
+all incentive records for a given pool ID and min uptime index by performing prefix iteration.
+
+## Precision Issues With Price
+
+There are precision issues that we must be considerate of in our design.
+
+Consider the balancer pool between `arb` base unit and `uosmo`:
+
+```bash
+osmosisd q gamm pool 1011
+pool:
+  '@type': /osmosis.gamm.v1beta1.Pool
+  address: osmo1pv6ffw8whyle2nyxhh8re44k4mu4smqd7fd66cu2y8gftw3473csxft8y5
+  future_pool_governor: 24h
+  id: "1011"
+  pool_assets:
+  - token:
+      amount: "101170077995723619690981"
+      denom: ibc/10E5E5B06D78FFBB61FD9F89209DEE5FD4446ED0550CBB8E3747DA79E10D9DC6
+    weight: "536870912000000"
+  - token:
+      amount: "218023341414"
+      denom: uosmo
+    weight: "536870912000000"
+  pool_params:
+    exit_fee: "0.000000000000000000"
+    smooth_weight_change_params: null
+    swap_fee: "0.002000000000000000"
+  total_shares:
+    amount: "18282469846754434906194"
+    denom: gamm/pool/1011
+  total_weight: "1073741824000000"
+```
+
+Let's say we want to migrate this into a CL pool where `uosmo` is the quote
+asset and `arb` base unit is the base asset.
+
+Note that quote asset is denom1 and base asset is denom0.
+We want quote asset to be `uosmo` so that limit orders on ticks
+have tick spacing in terms of `uosmo` as the quote.
+
+Note:
+- OSMO has precision of 6. 1 OSMO = 10**6 `uosmo`
+- ARB has precision of 18. 1 ARB = 10**18 `arb` base unit
+
+Therefore, the true price of the pool is:
+```python
+>>> (218023341414 / 10**6)  / (101170077995723619690981 / 10**18)
+2.1550180224553714
+```
+
+However, in our core logic it is represented as:
+
+```python
+218023341414 / 101170077995723619690981
+2.1550180224553714e-12
+```
+
+or
+
+```python
+osmosisd q gamm spot-price 1011 uosmo ibc/10E5E5B06D78FFBB61FD9F89209DEE5FD4446ED0550CBB8E3747DA79E10D9DC6
+spot_price: "0.000000000002155018"
+```
+
+As a protocol, we need to accomodate prices that are very far apart.
+In the example above, the difference between `10**6 and 10**18`
+
+Most of the native precision is 10**6. However, most of the ETH
+precision is 10**18.
+
+This starts to matter for assets such as `upepe`. That have
+a precision of 18 and a very low price level relative to
+the quote asset that has precision of 6 (e.g `uosmo` or `uusdc`).
+
+The true price of PEPE in USDC terms is `0.0000009749`.
+
+In the "on-chain representation", this would be:
+`0.0000009749 * 10**6 / 10**18 = 9.749e-19`
+
+Note that this is below the minimum precision of `osmomath.Dec`.
+
+Additionally, there is a problem with tick to sqrt price conversions
+where at small price levels, two sqrt prices can map to the same
+tick.
+
+As a workaround, we have decided to limit min spot price to 10^-12
+and min tick to `-108000000`. It has been shown at at price levels
+below 10^-12, this issue is most apparent. See this issue for details:
+<https://github.com/osmosis-labs/osmosis/issues/5550>
+
+Now, we have a problem that we cannot handle pairs where
+the quote asset has a precision of 6 and the base asset has a
+precision of 18.
+
+Note that this is not a problem for pairs where the quote asset
+has a precision of 18 and the base asset has a precision of 6.
+E.g. OSMO/DAI.
+
+### Solution
+
+At launch, pool creation is permissioned. Therefore, we can
+ensure correctness for the initial set of pools.
+
+Long term, we will implement a wrapper contract around concentrated liquidity
+that will handle the precision issues and scale the prices to all have a precision of at most 12.
+
+The contract will have to handle truncation and rounding to determine
+how to handle dust during this process. The truncated amount can be significant.
+That being said, this problem is out of scope for this document.
+
 ## Terminology
 
-We will use the following terms throughout the document:
+We will use the following terms throughout the document and our codebase:
 
-- `Virtual Reserves` - TODO
+- `Tick` - a unit that has a 1:1 mapping with price
 
-- `Real Reserves` - TODO
+- `Bucket` - an area between two initialized ticks.
 
-- `Tick` - TODO
+- `Tick Range` - a general term to describe a concept with lower and upper bound.
+  * Position is defined on a tick range.
+  * Bucket is defined on a tick range.
+  * A trader performs a swap over a tick range.
 
-- `Range` - TODO
+- `Tick Spacing` - the distance between two ticks that can be initialized. This is
+what defines the minimum bucket size.
+
+Note that ticks are defined inside buckets. Assume tick spacing is 100. A liquidity provider
+creates a position with amounts such that the current tick is 155 between ticks 100 and 200.
+
+Note, that the current tick of 155 is defined inside the bucket over a range of 100 to 200.
+
+- `Initialized Tick` - a tick at which LPs can provide liquidity. Some ticks cannot be
+initialized due to tick spacing. `MinCurrentTick` is an exception due to being 1 tick below
+`MinInitializedTick`. Only initialized ticks are crossed during a swap (see "Crossing Tick")
+for details.
+
+- `MinInitializedTick` - the minimum tick at which a position can be initialized. When this tick is
+crossed, all liquidity is consumed at the tick ends up on `MinCurrentTick`. At that point, there
+is no liquidity and the pool is in no bucket. To enter the first bucket, a swap right must be done
+to cross the next initialized tick and kick in the liquidity. If at least one full range position is
+defined, `MinInitializedTick` will be the first such tick.
+
+- `MinCurrentTick` - is the minimum value that a current tick can take. If we consume all liquidity and
+cross the min initialized tick, our current tick will equal to MinInitializedTick - 1 (MinCurrentTick)
+with zero liquidity. However, note that this `MinCurrentTick` cannot be crossed. If current tick equals
+to this tick, it is only possible to swap in the right (one for zero) direction.
+
+- MaxTick` - is the maximum tick at which a position can be initialized. It is also the maximum value that
+a current tick can be. Note that this is different from the `MinInitializedTick` and `MinCurrentTick` due
+to our definition of the full range (see below). The full range is inclusive of the lower tick but exclusive
+of the upper tick. As a result, we do not need to differentiate between the two for the max. When the pool
+is on the `MaxTick`, there is no liquidity. To kick in the liquidity, a swap left must be done to cross
+the `MaxTick` and enter the last bucket (when sequencing from left to right).
+
+- `Initialized Range` - the range of ticks that can be initialized: `[MinInitializedTick, MaxTick]`
+
+- `Full Range` - the maximum range at which a position can be defined: `[MinInitializedTick, MaxTick)`
+
+- `Crossing Tick` - crossing a tick means leaving one bucket and entering another. Each tick has a liquidity
+net value defined. This value measures "how much of liquidity needs to be added to the current when crossing
+a tick going left-to-right and entering a new bucket". This value is positive for lower ticks of a position
+and negative for higher. When going left-to-right, instead of adding, we subtract this value from the current liquidity.
+There are two edge cases. First, when pool crosses a `MinInitializedTick`, the pool does not enter any bucket.
+since it is now outside of the `Full Range`. Second, when pool crossed a `MaxTick`, the pool does not enter
+any bucket since it is now outside of the `Full Range`. Instead, we treat this being directly on either
+the `MinCurrentTick` or `MaxTick`.
 
 ## External Sources
 

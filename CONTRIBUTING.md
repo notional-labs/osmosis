@@ -219,13 +219,13 @@ func TestGetPoolAssetsByDenom(t *testing.T) {
             poolAssets: []balancer.PoolAsset {
                 {
                     Token:  sdk.NewInt64Coin("uosmo", 1e12),
-                    Weight: sdk.NewInt(100),
+                    Weight: osmomath.NewInt(100),
                 },
             },
             expectedPoolAssetsByDenom: map[string]balancer.PoolAsset {
                 "uosmo": {
                     Token:  sdk.NewInt64Coin("uosmo", 1e12),
-                    Weight: sdk.NewInt(100),
+                    Weight: osmomath.NewInt(100),
                 },
             },
         },
@@ -234,10 +234,10 @@ func TestGetPoolAssetsByDenom(t *testing.T) {
             poolAssets: []balancer.PoolAsset {
                 {
                     Token:  sdk.NewInt64Coin("uosmo", 1e12),
-                    Weight: sdk.NewInt(100),
+                    Weight: osmomath.NewInt(100),
                 }, {
                     Token:  sdk.NewInt64Coin("uosmo", 123),
-                    Weight: sdk.NewInt(400),
+                    Weight: osmomath.NewInt(400),
                 },
             },
             err: fmt.Errorf(balancer.ErrMsgFormatRepeatingPoolAssetsNotAllowed, "uosmo"),
@@ -343,7 +343,7 @@ You can also feel free to do `make format` if you're getting errors related to `
 
 There are several steps that go into a major release
 
-- The GitHub release is created via this [GitHub workflow](https://github.com/osmosis-labs/osmosis/blob/main/.github/workflows/release.yml). The workflow is manually triggered from the [osmosis-ci repository](https://github.com/osmosis-labs/osmosis-ci). The workflow uses the `make build-reproducible` command to create the `osmosisd` binaries using the default [Makefile](https://github.com/osmosis-labs/osmosis/blob/main/Makefile#L99).
+- The GitHub release is created in our private repo via this [GitHub workflow](https://github.com/osmosis-labs/osmosis-ci/blob/main/.github/workflows/create-release.yaml). The workflow is manually triggered from the [osmosis-ci repository](https://github.com/osmosis-labs/osmosis-ci). The workflow uses the `make build-reproducible` command to create the `osmosisd` binaries using the default [Makefile](https://github.com/osmosis-labs/osmosis/blob/main/Makefile#L99).
 
 - Make a PR to main, with a cosmovisor config, generated in tandem with the binaries from tool.
   - Should be its own PR, as it may get denied for Fork upgrades.
@@ -495,7 +495,7 @@ Additionally, this affects `LastResultsHash` because it contains a `Data` field 
 Version A
 
 ```go
-func (sk Keeper) validateAmount(ctx context.Context, amount sdk.Int) error {
+func (sk Keeper) validateAmount(ctx context.Context, amount osmomath.Int) error {
     if amount.IsNegative() {
         return sdkerrors.Wrap(sdkerrors.ErrInvalidRequest, "amount must be positive or zero")
     }
@@ -506,7 +506,7 @@ func (sk Keeper) validateAmount(ctx context.Context, amount sdk.Int) error {
 Version B
 
 ```go
-func (sk Keeper) validateAmount(ctx context.Context, amount sdk.Int) error {
+func (sk Keeper) validateAmount(ctx context.Context, amount osmomath.Int) error {
     if amount.IsNegative() || amount.IsZero() {
         return sdkerrors.Wrap(sdkerrors.ErrInvalidRequest, "amount must be positive")
     }
@@ -655,3 +655,21 @@ Thus, from the user's perspective, attempting to execute a swap that would cause
 #### Example 2: Bulk Coin Sends in Begin/EndBlock
 
 A much less obvious example of a panic trigger is running `SendCoins` on arbitrary input coins in begin/endblock, especially if the coins that can be included have logic that can trigger panics (e.g. blacklisted accounts for CW20 tokens). The solution in this case would be to transfer coins one by one with `SendCoin` and verifying each coin so that bad ones could be skipped.
+
+## Debug Osmosis Node VS Code & Delve
+
+1. Build the binary without stripping away debug symbols
+- Make sure `ldflags += -w -s` is not present
+- We have a vs code task named `build-debug` that builds the debug binary
+
+2. Start Osmosis node with the binary from step 1.
+
+3. Run "Attach to running osmosisd process" VS Code debug configuration
+
+What it does:
+- Runs a vs code background task that starts a delve server and attaches to the Osmosis node process ID
+- Attaches VS code project to delve and allows you to set breakpoints
+
+FAQ
+- Can this be used with localosmosis or inside Docker?
+  * Not currently but possible. Would need to run the delve server inside the container and expose the debug port

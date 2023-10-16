@@ -4,21 +4,23 @@ on:
   pull_request:
     types: [opened, labeled, unlabeled, synchronize]
     branches:
-      - 'main'
+      - "main"
 
 jobs:
   state_compatability_labels:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Get changed files
         id: changed-files
-        uses: tj-actions/changed-files@v36.0.16
+        uses: tj-actions/changed-files@v39.2.2
         with:
           files_ignore: |
             **/*.md
             **/*_test.go
+            tests/**
+            **/*.py
             .github/workflows/*.yml
 
       - name: Check required labels
@@ -27,7 +29,7 @@ jobs:
           steps.changed-files.outputs.any_changed == 'true' ||
           steps.changed-files.outputs.any_deleted == 'true' ||
           steps.changed-files.outputs.any_modified == 'true'
-        uses: mheap/github-action-required-labels@v4
+        uses: mheap/github-action-required-labels@v5
         env:
           GITHUB_TOKEN: ${{ secrets.ADD_TO_PROJECT_PAT }}
         with: #Require one of the following labels

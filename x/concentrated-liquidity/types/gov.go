@@ -6,6 +6,8 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
+
+	"github.com/osmosis-labs/osmosis/osmomath"
 )
 
 const (
@@ -72,7 +74,7 @@ func (p *CreateConcentratedLiquidityPoolsProposal) ValidateBasic() error {
 		}
 
 		spreadFactor := record.SpreadFactor
-		if spreadFactor.IsNegative() || spreadFactor.GTE(sdk.OneDec()) {
+		if spreadFactor.IsNegative() || spreadFactor.GTE(osmomath.OneDec()) {
 			return InvalidSpreadFactorError{ActualSpreadFactor: spreadFactor}
 		}
 	}
@@ -83,7 +85,7 @@ func (p *CreateConcentratedLiquidityPoolsProposal) ValidateBasic() error {
 func (p CreateConcentratedLiquidityPoolsProposal) String() string {
 	recordsStr := ""
 	for _, record := range p.PoolRecords {
-		recordsStr = recordsStr + fmt.Sprintf("(Denom0: %s, Denom1: %s, TickSpacing: %d, ExponentAtPriceOne: %d, SpreadFactor: %d) ", record.Denom0, record.Denom1, record.TickSpacing, record.ExponentAtPriceOne, record.SpreadFactor)
+		recordsStr = recordsStr + fmt.Sprintf("(Denom0: %s, Denom1: %s, TickSpacing: %d, SpreadFactor: %d) ", record.Denom0, record.Denom1, record.TickSpacing, record.SpreadFactor)
 	}
 
 	var b strings.Builder

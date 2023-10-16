@@ -6,14 +6,15 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
-	osmosimtypes "github.com/osmosis-labs/osmosis/v16/simulation/simtypes"
-	valsetkeeper "github.com/osmosis-labs/osmosis/v16/x/valset-pref"
-	"github.com/osmosis-labs/osmosis/v16/x/valset-pref/types"
+	"github.com/osmosis-labs/osmosis/osmomath"
+	osmosimtypes "github.com/osmosis-labs/osmosis/v20/simulation/simtypes"
+	valsetkeeper "github.com/osmosis-labs/osmosis/v20/x/valset-pref"
+	"github.com/osmosis-labs/osmosis/v20/x/valset-pref/types"
 )
 
 func RandomMsgSetValSetPreference(k valsetkeeper.Keeper, sim *osmosimtypes.SimCtx, ctx sdk.Context) (*types.MsgSetValidatorSetPreference, error) {
 	// Start with a weight of 1
-	remainingWeight := sdk.NewDec(1)
+	remainingWeight := osmomath.NewDec(1)
 
 	preferences, err := GetRandomValAndWeights(ctx, k, sim, remainingWeight)
 	if err != nil {
@@ -45,7 +46,7 @@ func RandomMsgDelegateToValSet(k valsetkeeper.Keeper, sim *osmosimtypes.SimCtx, 
 
 	return &types.MsgDelegateToValidatorSet{
 		Delegator: delegator.Address.String(),
-		Coin:      sdk.NewCoin(sdk.DefaultBondDenom, sdk.NewInt(int64(delegationCoin))),
+		Coin:      sdk.NewCoin(sdk.DefaultBondDenom, osmomath.NewInt(int64(delegationCoin))),
 	}, nil
 }
 
@@ -88,7 +89,7 @@ func RandomMsgUnDelegateFromValSet(k valsetkeeper.Keeper, sim *osmosimtypes.SimC
 
 	return &types.MsgUndelegateFromValidatorSet{
 		Delegator: delAddr.String(),
-		Coin:      sdk.NewCoin(sdk.DefaultBondDenom, sdk.NewInt(int64(undelegationCoin))),
+		Coin:      sdk.NewCoin(sdk.DefaultBondDenom, osmomath.NewInt(int64(undelegationCoin))),
 	}, nil
 }
 
@@ -125,7 +126,7 @@ func RandomMsgReDelegateToValSet(k valsetkeeper.Keeper, sim *osmosimtypes.SimCtx
 	}
 
 	// new delegations to redelegate to
-	remainingWeight := sdk.NewDec(1)
+	remainingWeight := osmomath.NewDec(1)
 	preferences, err := GetRandomValAndWeights(ctx, k, sim, remainingWeight)
 	if err != nil {
 		return nil, err
@@ -164,11 +165,11 @@ func RandomValidator(ctx sdk.Context, sim *osmosimtypes.SimCtx) *stakingtypes.Va
 	return &validators[rand.Intn(len(validators))]
 }
 
-func GetRandomValAndWeights(ctx sdk.Context, k valsetkeeper.Keeper, sim *osmosimtypes.SimCtx, remainingWeight sdk.Dec) ([]types.ValidatorPreference, error) {
+func GetRandomValAndWeights(ctx sdk.Context, k valsetkeeper.Keeper, sim *osmosimtypes.SimCtx, remainingWeight osmomath.Dec) ([]types.ValidatorPreference, error) {
 	var preferences []types.ValidatorPreference
 
 	// Generate random validators with random weights that sums to 1
-	for remainingWeight.GT(sdk.ZeroDec()) {
+	for remainingWeight.IsPositive() {
 		randValidator := RandomValidator(ctx, sim)
 		if randValidator == nil {
 			return nil, fmt.Errorf("No validator")
@@ -177,7 +178,7 @@ func GetRandomValAndWeights(ctx sdk.Context, k valsetkeeper.Keeper, sim *osmosim
 		randValue := sim.RandomDecAmount(remainingWeight)
 
 		remainingWeight = remainingWeight.Sub(randValue)
-		if !randValue.Equal(sdk.ZeroDec()) {
+		if !randValue.IsZero() {
 			preferences = append(preferences, types.ValidatorPreference{
 				ValOperAddress: randValidator.OperatorAddress,
 				Weight:         randValue,
@@ -185,13 +186,13 @@ func GetRandomValAndWeights(ctx sdk.Context, k valsetkeeper.Keeper, sim *osmosim
 		}
 	}
 
-	totalWeight := sdk.ZeroDec()
+	totalWeight := osmomath.ZeroDec()
 	// check if all the weights in preferences equal 1
 	for _, prefs := range preferences {
 		totalWeight = totalWeight.Add(prefs.Weight)
 	}
 
-	if !totalWeight.Equal(sdk.OneDec()) {
+	if !totalWeight.Equal(osmomath.OneDec()) {
 		return nil, fmt.Errorf("generated weights donot equal 1 got: %d", totalWeight)
 	}
 

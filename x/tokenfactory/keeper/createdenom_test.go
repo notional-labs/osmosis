@@ -4,16 +4,18 @@ import (
 	"fmt"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 
-	"github.com/osmosis-labs/osmosis/v16/app/apptesting"
-	"github.com/osmosis-labs/osmosis/v16/x/tokenfactory/types"
+	"github.com/osmosis-labs/osmosis/osmomath"
+	"github.com/osmosis-labs/osmosis/v20/app/apptesting"
+	"github.com/osmosis-labs/osmosis/v20/x/tokenfactory/types"
 )
 
 func (s *KeeperTestSuite) TestMsgCreateDenom() {
 	var (
 		tokenFactoryKeeper = s.App.TokenFactoryKeeper
 		bankKeeper         = s.App.BankKeeper
-		denomCreationFee   = sdk.NewCoins(sdk.NewCoin("uosmo", sdk.NewInt(1000000)))
+		denomCreationFee   = sdk.NewCoins(sdk.NewCoin("uosmo", osmomath.NewInt(1000000)))
 	)
 
 	// Set the denom creation fee. It is currently turned off in favor
@@ -47,7 +49,7 @@ func (s *KeeperTestSuite) TestMsgCreateDenom() {
 	s.Require().True(preCreateBalance.Sub(postCreateBalance).IsEqual(denomCreationFee[0]))
 
 	// Make sure that a second version of the same denom can't be recreated
-	res, err = s.msgServer.CreateDenom(sdk.WrapSDKContext(s.Ctx), types.NewMsgCreateDenom(s.TestAccs[0].String(), "bitcoin"))
+	_, err = s.msgServer.CreateDenom(sdk.WrapSDKContext(s.Ctx), types.NewMsgCreateDenom(s.TestAccs[0].String(), "bitcoin"))
 	s.Require().Error(err)
 
 	// Creating a second denom should work
@@ -68,7 +70,7 @@ func (s *KeeperTestSuite) TestMsgCreateDenom() {
 	s.Require().NotEmpty(res.GetNewTokenDenom())
 
 	// Make sure that an address with a "/" in it can't create denoms
-	res, err = s.msgServer.CreateDenom(sdk.WrapSDKContext(s.Ctx), types.NewMsgCreateDenom("osmosis.eth/creator", "bitcoin"))
+	_, err = s.msgServer.CreateDenom(sdk.WrapSDKContext(s.Ctx), types.NewMsgCreateDenom("osmosis.eth/creator", "bitcoin"))
 	s.Require().Error(err)
 }
 
@@ -76,10 +78,10 @@ func (s *KeeperTestSuite) TestCreateDenom() {
 	var (
 		primaryDenom            = "uosmo"
 		secondaryDenom          = apptesting.SecondaryDenom
-		defaultDenomCreationFee = types.Params{DenomCreationFee: sdk.NewCoins(sdk.NewCoin(primaryDenom, sdk.NewInt(50000000)))}
-		twoDenomCreationFee     = types.Params{DenomCreationFee: sdk.NewCoins(sdk.NewCoin(primaryDenom, sdk.NewInt(50000000)), sdk.NewCoin(secondaryDenom, sdk.NewInt(50000000)))}
+		defaultDenomCreationFee = types.Params{DenomCreationFee: sdk.NewCoins(sdk.NewCoin(primaryDenom, osmomath.NewInt(50000000)))}
+		twoDenomCreationFee     = types.Params{DenomCreationFee: sdk.NewCoins(sdk.NewCoin(primaryDenom, osmomath.NewInt(50000000)), sdk.NewCoin(secondaryDenom, osmomath.NewInt(50000000)))}
 		nilCreationFee          = types.Params{DenomCreationFee: nil}
-		largeCreationFee        = types.Params{DenomCreationFee: sdk.NewCoins(sdk.NewCoin(primaryDenom, sdk.NewInt(5000000000)))}
+		largeCreationFee        = types.Params{DenomCreationFee: sdk.NewCoins(sdk.NewCoin(primaryDenom, osmomath.NewInt(5000000000)))}
 	)
 
 	for _, tc := range []struct {
@@ -164,6 +166,20 @@ func (s *KeeperTestSuite) TestCreateDenom() {
 
 				s.Require().NoError(err)
 				s.Require().Equal(s.TestAccs[0].String(), queryRes.AuthorityMetadata.Admin)
+
+				// Make sure that the denom metadata is initialized correctly
+				metadata, found := bankKeeper.GetDenomMetaData(s.Ctx, res.GetNewTokenDenom())
+				s.Require().True(found)
+				s.Require().Equal(banktypes.Metadata{
+					DenomUnits: []*banktypes.DenomUnit{{
+						Denom:    res.GetNewTokenDenom(),
+						Exponent: 0,
+					}},
+					Base:    res.GetNewTokenDenom(),
+					Display: res.GetNewTokenDenom(),
+					Name:    res.GetNewTokenDenom(),
+					Symbol:  res.GetNewTokenDenom(),
+				}, metadata)
 			} else {
 				s.Require().Error(err)
 				// Ensure we don't charge if we expect an error

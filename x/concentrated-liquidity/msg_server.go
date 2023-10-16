@@ -5,8 +5,10 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	clmodel "github.com/osmosis-labs/osmosis/v16/x/concentrated-liquidity/model"
-	"github.com/osmosis-labs/osmosis/v16/x/concentrated-liquidity/types"
+	"github.com/osmosis-labs/osmosis/osmomath"
+	"github.com/osmosis-labs/osmosis/osmoutils/osmocli"
+	clmodel "github.com/osmosis-labs/osmosis/v20/x/concentrated-liquidity/model"
+	"github.com/osmosis-labs/osmosis/v20/x/concentrated-liquidity/types"
 )
 
 type msgServer struct {
@@ -19,15 +21,15 @@ func NewMsgServerImpl(keeper *Keeper) types.MsgServer {
 	}
 }
 
-func NewMsgCreatorServerImpl(keeper *Keeper) clmodel.MsgCreatorServer {
+func NewMsgCreatorServerImpl(keeper *Keeper) clmodel.MsgServer {
 	return &msgServer{
 		keeper: keeper,
 	}
 }
 
 var (
-	_ types.MsgServer          = msgServer{}
-	_ clmodel.MsgCreatorServer = msgServer{}
+	_ types.MsgServer   = msgServer{}
+	_ clmodel.MsgServer = msgServer{}
 )
 
 // CreateConcentratedPool attempts to create a concentrated liquidity pool via the poolmanager module, returning a MsgCreateConcentratedPoolResponse or an error upon failure.
@@ -52,7 +54,7 @@ func (server msgServer) CreatePosition(goCtx context.Context, msg *types.MsgCrea
 		return nil, err
 	}
 
-	positionId, actualAmount0, actualAmount1, liquidityCreated, joinTime, lowerTick, upperTick, err := server.keeper.createPosition(ctx, msg.PoolId, sender, msg.TokensProvided, msg.TokenMinAmount0, msg.TokenMinAmount1, msg.LowerTick, msg.UpperTick)
+	positionData, err := server.keeper.CreatePosition(ctx, msg.PoolId, sender, msg.TokensProvided, msg.TokenMinAmount0, msg.TokenMinAmount1, msg.LowerTick, msg.UpperTick)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +69,7 @@ func (server msgServer) CreatePosition(goCtx context.Context, msg *types.MsgCrea
 
 	// Note: create position event is emitted in keeper.createPosition(...)
 
-	return &types.MsgCreatePositionResponse{PositionId: positionId, Amount0: actualAmount0, Amount1: actualAmount1, JoinTime: joinTime, LiquidityCreated: liquidityCreated, LowerTick: lowerTick, UpperTick: upperTick}, nil
+	return &types.MsgCreatePositionResponse{PositionId: positionData.ID, Amount0: positionData.Amount0, Amount1: positionData.Amount1, LiquidityCreated: positionData.Liquidity, LowerTick: positionData.LowerTick, UpperTick: positionData.UpperTick}, nil
 }
 
 func (server msgServer) AddToPosition(goCtx context.Context, msg *types.MsgAddToPosition) (*types.MsgAddToPositionResponse, error) {
@@ -79,10 +81,10 @@ func (server msgServer) AddToPosition(goCtx context.Context, msg *types.MsgAddTo
 	}
 
 	if msg.TokenMinAmount0.IsNil() {
-		msg.TokenMinAmount0 = sdk.ZeroInt()
+		msg.TokenMinAmount0 = osmomath.ZeroInt()
 	}
 	if msg.TokenMinAmount1.IsNil() {
-		msg.TokenMinAmount1 = sdk.ZeroInt()
+		msg.TokenMinAmount1 = osmomath.ZeroInt()
 	}
 
 	positionId, actualAmount0, actualAmount1, err := server.keeper.addToPosition(ctx, sender, msg.PositionId, msg.Amount0, msg.Amount1, msg.TokenMinAmount0, msg.TokenMinAmount1)
@@ -201,7 +203,7 @@ func (server msgServer) CollectIncentives(goCtx context.Context, msg *types.MsgC
 	return &types.MsgCollectIncentivesResponse{CollectedIncentives: totalCollectedIncentives, ForfeitedIncentives: totalForefeitedIncentives}, nil
 }
 
-func (server msgServer) FungifyChargedPositions(goCtx context.Context, msg *types.MsgFungifyChargedPositions) (*types.MsgFungifyChargedPositionsResponse, error) {
+func (server msgServer) TransferPositions(goCtx context.Context, msg *types.MsgTransferPositions) (*types.MsgTransferPositionsResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 
 	sender, err := sdk.AccAddressFromBech32(msg.Sender)
@@ -209,7 +211,12 @@ func (server msgServer) FungifyChargedPositions(goCtx context.Context, msg *type
 		return nil, err
 	}
 
-	newPositionId, err := server.keeper.fungifyChargedPosition(ctx, sender, msg.PositionIds)
+	newOwner, err := sdk.AccAddressFromBech32(msg.NewOwner)
+	if err != nil {
+		return nil, err
+	}
+
+	err = server.keeper.transferPositions(ctx, msg.PositionIds, sender, newOwner)
 	if err != nil {
 		return nil, err
 	}
@@ -220,9 +227,14 @@ func (server msgServer) FungifyChargedPositions(goCtx context.Context, msg *type
 			sdk.NewAttribute(sdk.AttributeKeyModule, types.AttributeValueCategory),
 			sdk.NewAttribute(sdk.AttributeKeySender, msg.Sender),
 		),
+		sdk.NewEvent(
+			types.TypeEvtTransferPositions,
+			sdk.NewAttribute(sdk.AttributeKeyModule, types.AttributeValueCategory),
+			sdk.NewAttribute(sdk.AttributeKeySender, msg.Sender),
+			sdk.NewAttribute(types.AttributeNewOwner, msg.NewOwner),
+			sdk.NewAttribute(types.AttributeInputPositionIds, osmocli.ParseUint64SliceToString(msg.PositionIds)),
+		),
 	})
 
-	return &types.MsgFungifyChargedPositionsResponse{
-		NewPositionId: newPositionId,
-	}, nil
+	return &types.MsgTransferPositionsResponse{}, nil
 }

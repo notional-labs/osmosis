@@ -3,10 +3,10 @@ package keepers
 import (
 	"github.com/CosmWasm/wasmd/x/wasm"
 	wasmclient "github.com/CosmWasm/wasmd/x/wasm/client"
+	"github.com/cosmos/ibc-apps/middleware/packet-forward-middleware/v4/router"
 	transfer "github.com/cosmos/ibc-go/v4/modules/apps/transfer"
 	ibc "github.com/cosmos/ibc-go/v4/modules/core"
 	ibcclientclient "github.com/cosmos/ibc-go/v4/modules/core/02-client/client"
-	"github.com/strangelove-ventures/packet-forward-middleware/v4/router"
 
 	"github.com/cosmos/cosmos-sdk/types/module"
 	"github.com/cosmos/cosmos-sdk/x/auth"
@@ -29,27 +29,31 @@ import (
 	icq "github.com/cosmos/ibc-apps/modules/async-icq/v4"
 	ica "github.com/cosmos/ibc-go/v4/modules/apps/27-interchain-accounts"
 
-	_ "github.com/osmosis-labs/osmosis/v16/client/docs/statik"
-	clclient "github.com/osmosis-labs/osmosis/v16/x/concentrated-liquidity/client"
-	concentratedliquidity "github.com/osmosis-labs/osmosis/v16/x/concentrated-liquidity/clmodule"
-	cosmwasmpoolmodule "github.com/osmosis-labs/osmosis/v16/x/cosmwasmpool/module"
-	downtimemodule "github.com/osmosis-labs/osmosis/v16/x/downtime-detector/module"
-	"github.com/osmosis-labs/osmosis/v16/x/gamm"
-	gammclient "github.com/osmosis-labs/osmosis/v16/x/gamm/client"
-	"github.com/osmosis-labs/osmosis/v16/x/ibc-rate-limit/ibcratelimitmodule"
-	"github.com/osmosis-labs/osmosis/v16/x/incentives"
-	"github.com/osmosis-labs/osmosis/v16/x/lockup"
-	"github.com/osmosis-labs/osmosis/v16/x/mint"
-	poolincentives "github.com/osmosis-labs/osmosis/v16/x/pool-incentives"
-	poolincentivesclient "github.com/osmosis-labs/osmosis/v16/x/pool-incentives/client"
-	poolmanager "github.com/osmosis-labs/osmosis/v16/x/poolmanager/module"
-	"github.com/osmosis-labs/osmosis/v16/x/protorev"
-	superfluid "github.com/osmosis-labs/osmosis/v16/x/superfluid"
-	superfluidclient "github.com/osmosis-labs/osmosis/v16/x/superfluid/client"
-	"github.com/osmosis-labs/osmosis/v16/x/tokenfactory"
-	"github.com/osmosis-labs/osmosis/v16/x/twap/twapmodule"
-	"github.com/osmosis-labs/osmosis/v16/x/txfees"
-	valsetprefmodule "github.com/osmosis-labs/osmosis/v16/x/valset-pref/valpref-module"
+	_ "github.com/osmosis-labs/osmosis/v20/client/docs/statik"
+	clclient "github.com/osmosis-labs/osmosis/v20/x/concentrated-liquidity/client"
+	concentratedliquidity "github.com/osmosis-labs/osmosis/v20/x/concentrated-liquidity/clmodule"
+	cwpoolclient "github.com/osmosis-labs/osmosis/v20/x/cosmwasmpool/client"
+	cosmwasmpoolmodule "github.com/osmosis-labs/osmosis/v20/x/cosmwasmpool/module"
+	downtimemodule "github.com/osmosis-labs/osmosis/v20/x/downtime-detector/module"
+	"github.com/osmosis-labs/osmosis/v20/x/gamm"
+	gammclient "github.com/osmosis-labs/osmosis/v20/x/gamm/client"
+	"github.com/osmosis-labs/osmosis/v20/x/ibc-rate-limit/ibcratelimitmodule"
+	"github.com/osmosis-labs/osmosis/v20/x/incentives"
+	incentivesclient "github.com/osmosis-labs/osmosis/v20/x/incentives/client"
+	"github.com/osmosis-labs/osmosis/v20/x/lockup"
+	"github.com/osmosis-labs/osmosis/v20/x/mint"
+	poolincentives "github.com/osmosis-labs/osmosis/v20/x/pool-incentives"
+	poolincentivesclient "github.com/osmosis-labs/osmosis/v20/x/pool-incentives/client"
+	poolmanagerclient "github.com/osmosis-labs/osmosis/v20/x/poolmanager/client"
+	poolmanager "github.com/osmosis-labs/osmosis/v20/x/poolmanager/module"
+	"github.com/osmosis-labs/osmosis/v20/x/protorev"
+	superfluid "github.com/osmosis-labs/osmosis/v20/x/superfluid"
+	superfluidclient "github.com/osmosis-labs/osmosis/v20/x/superfluid/client"
+	"github.com/osmosis-labs/osmosis/v20/x/tokenfactory"
+	"github.com/osmosis-labs/osmosis/v20/x/twap/twapmodule"
+	"github.com/osmosis-labs/osmosis/v20/x/txfees"
+	txfeesclient "github.com/osmosis-labs/osmosis/v20/x/txfees/client"
+	valsetprefmodule "github.com/osmosis-labs/osmosis/v20/x/valset-pref/valpref-module"
 	"github.com/osmosis-labs/osmosis/x/epochs"
 	ibc_hooks "github.com/osmosis-labs/osmosis/x/ibc-hooks"
 )
@@ -80,8 +84,15 @@ var AppModuleBasics = []module.AppModuleBasic{
 			superfluidclient.UpdateUnpoolWhitelistProposalHandler,
 			gammclient.ReplaceMigrationRecordsProposalHandler,
 			gammclient.UpdateMigrationRecordsProposalHandler,
+			gammclient.CreateCLPoolAndLinkToCFMMProposalHandler,
+			gammclient.SetScalingFactorControllerProposalHandler,
 			clclient.CreateConcentratedLiquidityPoolProposalHandler,
 			clclient.TickSpacingDecreaseProposalHandler,
+			cwpoolclient.UploadCodeIdAndWhitelistProposalHandler,
+			cwpoolclient.MigratePoolContractsProposalHandler,
+			txfeesclient.SubmitUpdateFeeTokenProposalHandler,
+			poolmanagerclient.DenomPairTakerFeeProposalHandler,
+			incentivesclient.HandleCreateGroupsProposal,
 		)...,
 	),
 	params.AppModuleBasic{},

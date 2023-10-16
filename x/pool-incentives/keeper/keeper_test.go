@@ -4,16 +4,15 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/osmosis-labs/osmosis/v16/app/apptesting"
-	appParams "github.com/osmosis-labs/osmosis/v16/app/params"
-	gammtypes "github.com/osmosis-labs/osmosis/v16/x/gamm/types"
-	incentivestypes "github.com/osmosis-labs/osmosis/v16/x/incentives/types"
-	"github.com/osmosis-labs/osmosis/v16/x/pool-incentives/types"
-	poolincentivestypes "github.com/osmosis-labs/osmosis/v16/x/pool-incentives/types"
-	poolmanagertypes "github.com/osmosis-labs/osmosis/v16/x/poolmanager/types"
+	"github.com/osmosis-labs/osmosis/osmomath"
+	"github.com/osmosis-labs/osmosis/v20/app/apptesting"
+	gammtypes "github.com/osmosis-labs/osmosis/v20/x/gamm/types"
+	incentivestypes "github.com/osmosis-labs/osmosis/v20/x/incentives/types"
+	"github.com/osmosis-labs/osmosis/v20/x/pool-incentives/types"
+	poolincentivestypes "github.com/osmosis-labs/osmosis/v20/x/pool-incentives/types"
+	poolmanagertypes "github.com/osmosis-labs/osmosis/v20/x/poolmanager/types"
 )
 
 type KeeperTestSuite struct {
@@ -92,6 +91,15 @@ func (s *KeeperTestSuite) TestCreateConcentratePoolGauges() {
 		// Same amount of gauges as lockableDurations must be created for every pool created.
 		gaugeId, err := keeper.GetPoolGaugeId(s.Ctx, clPool.GetId(), currEpoch.Duration)
 		s.NoError(err)
+
+		// Same amount of NoLock gauges as lockableDurations must be created for every pool created.
+		gaugeIds, err := keeper.GetNoLockGaugeIdsFromPool(s.Ctx, clPool.GetId())
+		s.NoError(err)
+
+		s.Equal(1, len(gaugeIds))
+
+		s.Equal(gaugeId, gaugeIds[0])
+
 		gauge, err := s.App.IncentivesKeeper.GetGaugeByID(s.Ctx, gaugeId)
 		s.NoError(err)
 		s.Equal(0, len(gauge.Coins))
@@ -104,11 +112,12 @@ func (s *KeeperTestSuite) TestCreateLockablePoolGauges() {
 	durations := s.App.PoolIncentivesKeeper.GetLockableDurations(s.Ctx)
 
 	tests := []struct {
-		name                   string
-		poolId                 uint64
-		expectedGaugeDurations []time.Duration
-		expectedGaugeIds       []uint64
-		expectedErr            bool
+		name                      string
+		poolId                    uint64
+		isInvalidLockableDuration bool
+		expectedGaugeDurations    []time.Duration
+		expectedGaugeIds          []uint64
+		expectedErr               bool
 	}{
 		{
 			name:                   "Create Gauge with valid PoolId",
@@ -124,12 +133,26 @@ func (s *KeeperTestSuite) TestCreateLockablePoolGauges() {
 			expectedGaugeIds:       []uint64{},
 			expectedErr:            true,
 		},
+		{
+			name:                      "error: invalid lockable duration",
+			poolId:                    uint64(1),
+			isInvalidLockableDuration: true,
+
+			expectedErr: true,
+		},
 	}
 
 	for _, tc := range tests {
 		s.Run(tc.name, func() {
 			s.SetupTest()
+
 			poolId := s.PrepareBalancerPool()
+
+			// This should trigger error when creating a pool id <> gauge id internal incentive link.
+			if tc.isInvalidLockableDuration {
+				durations = []time.Duration{time.Duration(0)}
+				s.App.PoolIncentivesKeeper.SetLockableDurations(s.Ctx, durations)
+			}
 
 			err := s.App.PoolIncentivesKeeper.CreateLockablePoolGauges(s.Ctx, tc.poolId)
 			if tc.expectedErr {
@@ -220,7 +243,7 @@ func (s *KeeperTestSuite) TestCreateConcentratedLiquidityPoolGauge() {
 				s.Require().True(gaugeInfo.IsPerpetual)
 				s.Require().Empty(gaugeInfo.Coins)
 				s.Require().Equal(s.Ctx.BlockTime(), gaugeInfo.StartTime)
-				s.Require().Equal(appParams.BaseCoinUnit, gaugeInfo.DistributeTo.Denom)
+				s.Require().Equal(incentivestypes.NoLockInternalGaugeDenom(tc.poolId), gaugeInfo.DistributeTo.Denom)
 				s.Require().Equal(uint64(1), gaugeInfo.NumEpochsPaidOver)
 			}
 		})
@@ -322,17 +345,17 @@ func (s *KeeperTestSuite) TestGetLongestLockableDuration() {
 func (s *KeeperTestSuite) TestIsPoolIncentivized() {
 	testCases := []struct {
 		name                   string
-		poolId                 uint64
+		poolIdToQuery          uint64
 		expectedIsIncentivized bool
 	}{
 		{
 			name:                   "Incentivized Pool",
-			poolId:                 1,
+			poolIdToQuery:          1,
 			expectedIsIncentivized: true,
 		},
 		{
 			name:                   "Unincentivized Pool",
-			poolId:                 2,
+			poolIdToQuery:          2,
 			expectedIsIncentivized: false,
 		},
 	}
@@ -340,20 +363,80 @@ func (s *KeeperTestSuite) TestIsPoolIncentivized() {
 	for _, tc := range testCases {
 		s.Run(tc.name, func() {
 			s.SetupTest()
-			s.PrepareConcentratedPool()
+			s.PrepareAllSupportedPools()
 
 			s.App.PoolIncentivesKeeper.SetDistrInfo(s.Ctx, poolincentivestypes.DistrInfo{
-				TotalWeight: sdk.NewInt(100),
+				TotalWeight: osmomath.NewInt(100),
 				Records: []poolincentivestypes.DistrRecord{
 					{
-						GaugeId: tc.poolId,
-						Weight:  sdk.NewInt(50),
+						GaugeId: 1,
+						Weight:  osmomath.NewInt(50),
 					},
 				},
 			})
 
-			actualIsIncentivized := s.App.PoolIncentivesKeeper.IsPoolIncentivized(s.Ctx, tc.poolId)
+			actualIsIncentivized, err := s.App.PoolIncentivesKeeper.IsPoolIncentivized(s.Ctx, tc.poolIdToQuery)
+			s.Require().NoError(err)
 			s.Require().Equal(tc.expectedIsIncentivized, actualIsIncentivized)
+		})
+	}
+}
+
+// Tests that for every supported internally incentivized pool,
+// the appropriate gauge ID is returned.
+// For balancer and stableswap, returns the longest duration gauge ID.
+// For CL, returns the gauge ID for the current epoch incentive duration.
+// For cosmwasm pool, returns an error.
+// For non-existent pool ID, returns an error.
+func (suite *KeeperTestSuite) TestGetInternalGaugeIDForPool() {
+
+	// Note that we initialize the same state for all pools.
+	suite.SetupTest()
+
+	// Prepare pools and their IDs
+	poolInfo := suite.PrepareAllSupportedPools()
+
+	tests := map[string]struct {
+		poolID          uint64
+		expectedGaugeID uint64
+		expectError     error
+	}{
+		"concentrated pool": {
+			poolID:          poolInfo.ConcentratedPoolID,
+			expectedGaugeID: poolInfo.ConcentratedGaugeID,
+		},
+		"balancer pool": {
+			poolID:          poolInfo.BalancerPoolID,
+			expectedGaugeID: poolInfo.BalancerGaugeID,
+		},
+		"stableswap pool": {
+			poolID:          poolInfo.StableSwapPoolID,
+			expectedGaugeID: poolInfo.StableSwapGaugeID,
+		},
+		"cosmwasm pool": {
+			poolID:      poolInfo.CosmWasmPoolID,
+			expectError: types.UnsupportedPoolTypeError{PoolID: poolInfo.CosmWasmPoolID, PoolType: poolmanagertypes.CosmWasm},
+		},
+		"pool with given ID does not exist": {
+			poolID:      poolInfo.CosmWasmPoolID + 1,
+			expectError: poolmanagertypes.FailedToFindRouteError{PoolId: poolInfo.CosmWasmPoolID + 1},
+		},
+	}
+
+	for name, tc := range tests {
+		suite.Run(name, func() {
+
+			poolIncentivesKeeper := suite.App.PoolIncentivesKeeper
+
+			gaugeID, err := poolIncentivesKeeper.GetInternalGaugeIDForPool(suite.Ctx, tc.poolID)
+
+			if tc.expectError != nil {
+				suite.Require().Error(err)
+				suite.Require().ErrorIs(tc.expectError, err)
+				return
+			}
+			suite.Require().NoError(err)
+			suite.Require().Equal(tc.expectedGaugeID, gaugeID)
 		})
 	}
 }

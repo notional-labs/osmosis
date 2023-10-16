@@ -9,10 +9,14 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/query"
 
+	errorsmod "cosmossdk.io/errors"
+
+	"github.com/osmosis-labs/osmosis/osmomath"
 	"github.com/osmosis-labs/osmosis/osmoutils"
-	"github.com/osmosis-labs/osmosis/v16/x/concentrated-liquidity/model"
-	types "github.com/osmosis-labs/osmosis/v16/x/concentrated-liquidity/types"
-	poolmanagertypes "github.com/osmosis-labs/osmosis/v16/x/poolmanager/types"
+	"github.com/osmosis-labs/osmosis/v20/x/concentrated-liquidity/model"
+	types "github.com/osmosis-labs/osmosis/v20/x/concentrated-liquidity/types"
+	lockuptypes "github.com/osmosis-labs/osmosis/v20/x/lockup/types"
+	poolmanagertypes "github.com/osmosis-labs/osmosis/v20/x/poolmanager/types"
 )
 
 // InitializePool initializes a new concentrated liquidity pool with the given PoolI interface and creator address.
@@ -38,17 +42,43 @@ func (k Keeper) InitializePool(ctx sdk.Context, poolI poolmanagertypes.PoolI, cr
 	spreadFactor := concentratedPool.GetSpreadFactor(ctx)
 	poolId := concentratedPool.GetId()
 	quoteAsset := concentratedPool.GetToken1()
+	poolManagerParams := k.poolmanagerKeeper.GetParams(ctx)
 
-	if !k.validateTickSpacing(ctx, params, tickSpacing) {
-		return types.UnauthorizedTickSpacingError{ProvidedTickSpacing: tickSpacing, AuthorizedTickSpacings: params.AuthorizedTickSpacing}
+	bypassRestrictions := false
+
+	poolmanagerModuleAcc := k.accountKeeper.GetModuleAccount(ctx, poolmanagertypes.ModuleName).GetAddress()
+
+	// allow pool mananger module account to bypass restrictions (i.e. gov prop)
+	if creatorAddress.Equals(poolmanagerModuleAcc) {
+		bypassRestrictions = true
 	}
 
-	if !k.validateSpreadFactor(ctx, params, spreadFactor) {
-		return types.UnauthorizedSpreadFactorError{ProvidedSpreadFactor: spreadFactor, AuthorizedSpreadFactors: params.AuthorizedSpreadFactors}
+	// allow whitelisted pool creators to bypass restrictions
+	if !bypassRestrictions {
+		for _, addr := range params.UnrestrictedPoolCreatorWhitelist {
+			// okay to use MustAccAddressFromBech32 because already validated in params
+			if sdk.MustAccAddressFromBech32(addr).Equals(creatorAddress) {
+				bypassRestrictions = true
+			}
+		}
 	}
 
-	if !validateAuthorizedQuoteDenoms(ctx, quoteAsset, params.AuthorizedQuoteDenoms) {
-		return types.UnauthorizedQuoteDenomError{ProvidedQuoteDenom: quoteAsset, AuthorizedQuoteDenoms: params.AuthorizedQuoteDenoms}
+	if !bypassRestrictions {
+		if !k.IsPermissionlessPoolCreationEnabled(ctx) {
+			return types.ErrPermissionlessPoolCreationDisabled
+		}
+
+		if !k.validateTickSpacing(params, tickSpacing) {
+			return types.UnauthorizedTickSpacingError{ProvidedTickSpacing: tickSpacing, AuthorizedTickSpacings: params.AuthorizedTickSpacing}
+		}
+
+		if !k.validateSpreadFactor(params, spreadFactor) {
+			return types.UnauthorizedSpreadFactorError{ProvidedSpreadFactor: spreadFactor, AuthorizedSpreadFactors: params.AuthorizedSpreadFactors}
+		}
+
+		if !validateAuthorizedQuoteDenoms(quoteAsset, poolManagerParams.AuthorizedQuoteDenoms) {
+			return types.UnauthorizedQuoteDenomError{ProvidedQuoteDenom: quoteAsset, AuthorizedQuoteDenoms: poolManagerParams.AuthorizedQuoteDenoms}
+		}
 	}
 
 	if err := k.createSpreadRewardAccumulator(ctx, poolId); err != nil {
@@ -139,31 +169,31 @@ func (k Keeper) CalculateSpotPrice(
 	poolId uint64,
 	quoteAssetDenom string,
 	baseAssetDenom string,
-) (spotPrice sdk.Dec, err error) {
+) (spotPrice osmomath.BigDec, err error) {
 	concentratedPool, err := k.getPoolById(ctx, poolId)
 	if err != nil {
-		return sdk.Dec{}, err
+		return osmomath.BigDec{}, err
 	}
 
 	hasPositions, err := k.HasAnyPositionForPool(ctx, poolId)
 	if err != nil {
-		return sdk.Dec{}, err
+		return osmomath.BigDec{}, err
 	}
 
 	if !hasPositions {
-		return sdk.Dec{}, types.NoSpotPriceWhenNoLiquidityError{PoolId: poolId}
+		return osmomath.BigDec{}, types.NoSpotPriceWhenNoLiquidityError{PoolId: poolId}
 	}
 
 	price, err := concentratedPool.SpotPrice(ctx, quoteAssetDenom, baseAssetDenom)
 	if err != nil {
-		return sdk.Dec{}, err
+		return osmomath.BigDec{}, err
 	}
 
 	if price.IsZero() {
-		return sdk.Dec{}, types.PriceBoundError{ProvidedPrice: price, MinSpotPrice: types.MinSpotPrice, MaxSpotPrice: types.MaxSpotPrice}
+		return osmomath.BigDec{}, types.PriceBoundError{ProvidedPrice: price, MinSpotPrice: types.MinSpotPriceV2, MaxSpotPrice: types.MaxSpotPrice}
 	}
-	if price.GT(types.MaxSpotPrice) || price.LT(types.MinSpotPrice) {
-		return sdk.Dec{}, types.PriceBoundError{ProvidedPrice: price, MinSpotPrice: types.MinSpotPrice, MaxSpotPrice: types.MaxSpotPrice}
+	if price.GT(types.MaxSpotPriceBigDec) || price.LT(types.MinSpotPriceBigDec) {
+		return osmomath.BigDec{}, types.PriceBoundError{ProvidedPrice: price, MinSpotPrice: types.MinSpotPriceBigDec, MaxSpotPrice: types.MaxSpotPrice}
 	}
 
 	return price, nil
@@ -267,7 +297,7 @@ func (k Keeper) DecreaseConcentratedPoolTickSpacing(ctx sdk.Context, poolIdToTic
 		}
 		params := k.GetParams(ctx)
 
-		if !k.validateTickSpacingUpdate(ctx, pool, params, poolIdToTickSpacingRecord.NewTickSpacing) {
+		if !k.validateTickSpacingUpdate(pool, params, poolIdToTickSpacingRecord.NewTickSpacing) {
 			return fmt.Errorf("tick spacing %d is not valid", poolIdToTickSpacingRecord.NewTickSpacing)
 		}
 
@@ -282,7 +312,7 @@ func (k Keeper) DecreaseConcentratedPoolTickSpacing(ctx sdk.Context, poolIdToTic
 
 // validateTickSpacing returns true if the given tick spacing is one of the authorized tick spacings set in the
 // params. False otherwise.
-func (k Keeper) validateTickSpacing(ctx sdk.Context, params types.Params, tickSpacing uint64) bool {
+func (k Keeper) validateTickSpacing(params types.Params, tickSpacing uint64) bool {
 	for _, authorizedTick := range params.AuthorizedTickSpacing {
 		if tickSpacing == authorizedTick {
 			return true
@@ -293,7 +323,7 @@ func (k Keeper) validateTickSpacing(ctx sdk.Context, params types.Params, tickSp
 
 // validateTickSpacingUpdate returns true if the given tick spacing is one of the authorized tick spacings set in the
 // params and is less than the current tick spacing. False otherwise.
-func (k Keeper) validateTickSpacingUpdate(ctx sdk.Context, pool types.ConcentratedPoolExtension, params types.Params, newTickSpacing uint64) bool {
+func (k Keeper) validateTickSpacingUpdate(pool types.ConcentratedPoolExtension, params types.Params, newTickSpacing uint64) bool {
 	currentTickSpacing := pool.GetTickSpacing()
 	for _, authorizedTick := range params.AuthorizedTickSpacing {
 		// New tick spacing must be one of the authorized tick spacings and must be less than the current tick spacing
@@ -306,7 +336,7 @@ func (k Keeper) validateTickSpacingUpdate(ctx sdk.Context, pool types.Concentrat
 
 // validateSpreadFactor returns true if the given spread factor is one of the authorized spread factors set in the
 // params. False otherwise.
-func (k Keeper) validateSpreadFactor(ctx sdk.Context, params types.Params, spreadFactor sdk.Dec) bool {
+func (k Keeper) validateSpreadFactor(params types.Params, spreadFactor osmomath.Dec) bool {
 	for _, authorizedSpreadFactor := range params.AuthorizedSpreadFactors {
 		if spreadFactor.Equal(authorizedSpreadFactor) {
 			return true
@@ -325,11 +355,58 @@ func (k Keeper) validateSpreadFactor(ctx sdk.Context, params types.Params, sprea
 //
 // Returns:
 // - bool: A boolean indicating if the denom1 is authorized or not.
-func validateAuthorizedQuoteDenoms(ctx sdk.Context, denom1 string, authorizedQuoteDenoms []string) bool {
+func validateAuthorizedQuoteDenoms(denom1 string, authorizedQuoteDenoms []string) bool {
 	for _, authorizedQuoteDenom := range authorizedQuoteDenoms {
 		if denom1 == authorizedQuoteDenom {
 			return true
 		}
 	}
 	return false
+}
+
+// GetLinkedBalancerPoolID is a wrapper function for gammKeeper.GetLinkedBalancerPoolID in order to allow
+// the concentrated pool module to access the linked balancer pool id via query.
+// Without this function, both pool link query functions would have to live in the gamm module which is unintuitive.
+func (k Keeper) GetLinkedBalancerPoolID(ctx sdk.Context, concentratedPoolId uint64) (uint64, error) {
+	return k.gammKeeper.GetLinkedBalancerPoolID(ctx, concentratedPoolId)
+}
+
+func (k Keeper) GetUserUnbondingPositions(ctx sdk.Context, address sdk.AccAddress) ([]model.PositionWithPeriodLock, error) {
+	// Get the position IDs for the specified user address.
+	positions, err := k.GetUserPositions(ctx, address, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	// Query each position ID and determine if it has a lock ID associated with it.
+	// Construct a response with the position as well as the lock's info.
+	var userPositionsWithPeriodLocks []model.PositionWithPeriodLock
+	for _, pos := range positions {
+		lockId, err := k.GetLockIdFromPositionId(ctx, pos.PositionId)
+		if errors.Is(err, types.PositionIdToLockNotFoundError{PositionId: pos.PositionId}) {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		// If we have hit this logic branch, it means that, at one point, the lockId provided existed. If we fetch it again
+		// and it doesn't exist, that means that the lock has matured.
+		lock, err := k.lockupKeeper.GetLockByID(ctx, lockId)
+		if errors.Is(err, errorsmod.Wrap(lockuptypes.ErrLockupNotFound, fmt.Sprintf("lock with ID %d does not exist", lockId))) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		// Don't include locks that aren't unlocking
+		if lock.EndTime.IsZero() {
+			continue
+		}
+
+		userPositionsWithPeriodLocks = append(userPositionsWithPeriodLocks, model.PositionWithPeriodLock{
+			Position: pos,
+			Locks:    *lock,
+		})
+	}
+	return userPositionsWithPeriodLocks, nil
 }

@@ -1,9 +1,10 @@
 package keeper
 
 import (
+	"errors"
 	"fmt"
 
-	"github.com/osmosis-labs/osmosis/v16/x/protorev/types"
+	"github.com/osmosis-labs/osmosis/v20/x/protorev/types"
 
 	"github.com/cosmos/cosmos-sdk/store/prefix"
 
@@ -118,17 +119,37 @@ func (k Keeper) DeleteBaseDenoms(ctx sdk.Context) {
 	k.DeleteAllEntriesForKeyPrefix(ctx, types.KeyPrefixBaseDenoms)
 }
 
-// GetPoolForDenomPair returns the id of the highest liquidty pool between the base denom and the denom to match
+// GetPoolForDenomPair returns the id of the highest liquidity pool between the base denom and the denom to match
 func (k Keeper) GetPoolForDenomPair(ctx sdk.Context, baseDenom, denomToMatch string) (uint64, error) {
 	store := prefix.NewStore(ctx.KVStore(k.storeKey), types.KeyPrefixDenomPairToPool)
 	key := types.GetKeyPrefixDenomPairToPool(baseDenom, denomToMatch)
 
 	bz := store.Get(key)
 	if len(bz) == 0 {
-		return 0, fmt.Errorf("highest liquidity pool between base %s and match denom %s not found", baseDenom, denomToMatch)
+		return 0, types.NoPoolForDenomPairError{BaseDenom: baseDenom, MatchDenom: denomToMatch}
 	}
 
 	poolId := sdk.BigEndianToUint64(bz)
+	return poolId, nil
+}
+
+// GetPoolForDenomPairNoOrder returns the id of the pool between the two denoms.
+// It is order-independent. That is, tokenA can either be a base or a quote. Both cases are handled.
+// If no pool exists, an error is returned.
+// TODO: unit test
+func (k Keeper) GetPoolForDenomPairNoOrder(ctx sdk.Context, tokenA, tokenB string) (uint64, error) {
+	poolId, err := k.GetPoolForDenomPair(ctx, tokenA, tokenB)
+	if err != nil {
+		if errors.Is(err, types.NoPoolForDenomPairError{BaseDenom: tokenA, MatchDenom: tokenB}) {
+			// Attempt changing base and mathch denoms.
+			poolId, err = k.GetPoolForDenomPair(ctx, tokenB, tokenA)
+			if err != nil {
+				return 0, err
+			}
+		} else {
+			return 0, err
+		}
+	}
 	return poolId, nil
 }
 
@@ -144,6 +165,57 @@ func (k Keeper) SetPoolForDenomPair(ctx sdk.Context, baseDenom, denomToMatch str
 func (k Keeper) DeleteAllPoolsForBaseDenom(ctx sdk.Context, baseDenom string) {
 	key := append(types.KeyPrefixDenomPairToPool, types.GetKeyPrefixDenomPairToPool(baseDenom, "")...)
 	k.DeleteAllEntriesForKeyPrefix(ctx, key)
+}
+
+// SetSwapsToBackrun sets the swaps to backrun, updated via hooks
+func (k Keeper) SetSwapsToBackrun(ctx sdk.Context, swapsToBackrun types.Route) error {
+	store := prefix.NewStore(ctx.KVStore(k.storeKey), types.KeyPrefixSwapsToBackrun)
+
+	bz, err := swapsToBackrun.Marshal()
+	if err != nil {
+		return err
+	}
+
+	store.Set(types.KeyPrefixSwapsToBackrun, bz)
+
+	return nil
+}
+
+// GetSwapsToBackrun returns the swaps to backrun, updated via hooks
+func (k Keeper) GetSwapsToBackrun(ctx sdk.Context) (types.Route, error) {
+	store := prefix.NewStore(ctx.KVStore(k.storeKey), types.KeyPrefixSwapsToBackrun)
+	bz := store.Get(types.KeyPrefixSwapsToBackrun)
+
+	swapsToBackrun := types.Route{}
+	err := swapsToBackrun.Unmarshal(bz)
+	if err != nil {
+		return types.Route{}, err
+	}
+
+	return swapsToBackrun, nil
+}
+
+// DeleteSwapsToBackrun deletes the swaps to backrun
+func (k Keeper) DeleteSwapsToBackrun(ctx sdk.Context) {
+	store := prefix.NewStore(ctx.KVStore(k.storeKey), types.KeyPrefixSwapsToBackrun)
+	store.Delete(types.KeyPrefixSwapsToBackrun)
+}
+
+// AddSwapToSwapsToBackrun appends a swap to the swaps to backrun
+func (k Keeper) AddSwapsToSwapsToBackrun(ctx sdk.Context, swaps []types.Trade) error {
+	swapsToBackrun, err := k.GetSwapsToBackrun(ctx)
+	if err != nil {
+		return err
+	}
+
+	swapsToBackrun.Trades = append(swapsToBackrun.Trades, swaps...)
+
+	err = k.SetSwapsToBackrun(ctx, swapsToBackrun)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // DeleteAllEntriesForKeyPrefix deletes all the entries from the store for the given key prefix
@@ -397,17 +469,17 @@ func (k Keeper) SetMaxPointsPerBlock(ctx sdk.Context, maxPoints uint64) error {
 	return nil
 }
 
-// GetPoolWeights retrieves the weights of different pool types. The weight of a pool type roughly
-// corresponds to the amount of time it will take to simulate and execute a swap on that pool type (in ms).
-func (k Keeper) GetPoolWeights(ctx sdk.Context) types.PoolWeights {
-	store := prefix.NewStore(ctx.KVStore(k.storeKey), types.KeyPrefixPoolWeights)
-	poolWeights := &types.PoolWeights{}
-	osmoutils.MustGet(store, types.KeyPrefixPoolWeights, poolWeights)
+// GetInfoByPoolType retrieves the metadata about the different pool types. This is used to determine the execution costs of
+// different pool types when calculating the optimal route (in terms of time and gas consumption).
+func (k Keeper) GetInfoByPoolType(ctx sdk.Context) types.InfoByPoolType {
+	store := prefix.NewStore(ctx.KVStore(k.storeKey), types.KeyPrefixInfoByPoolType)
+	poolWeights := &types.InfoByPoolType{}
+	osmoutils.MustGet(store, types.KeyPrefixInfoByPoolType, poolWeights)
 	return *poolWeights
 }
 
-// SetPoolWeights sets the weights of different pool types.
-func (k Keeper) SetPoolWeights(ctx sdk.Context, poolWeights types.PoolWeights) {
-	store := prefix.NewStore(ctx.KVStore(k.storeKey), types.KeyPrefixPoolWeights)
-	osmoutils.MustSet(store, types.KeyPrefixPoolWeights, &poolWeights)
+// SetInfoByPoolType sets the pool type information.
+func (k Keeper) SetInfoByPoolType(ctx sdk.Context, poolWeights types.InfoByPoolType) {
+	store := prefix.NewStore(ctx.KVStore(k.storeKey), types.KeyPrefixInfoByPoolType)
+	osmoutils.MustSet(store, types.KeyPrefixInfoByPoolType, &poolWeights)
 }

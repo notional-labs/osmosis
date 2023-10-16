@@ -6,7 +6,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 
-	"github.com/osmosis-labs/osmosis/v16/x/tokenfactory/types"
+	"github.com/osmosis-labs/osmosis/v20/x/tokenfactory/types"
 )
 
 // ConvertToBaseToken converts a fee amount in a whitelisted fee token to the base fee token amount
@@ -16,7 +16,7 @@ func (k Keeper) CreateDenom(ctx sdk.Context, creatorAddr string, subdenom string
 		return "", err
 	}
 
-	err = k.chargeForCreateDenom(ctx, creatorAddr, subdenom)
+	err = k.chargeForCreateDenom(ctx, creatorAddr)
 	if err != nil {
 		return "", err
 	}
@@ -28,15 +28,21 @@ func (k Keeper) CreateDenom(ctx sdk.Context, creatorAddr string, subdenom string
 // Runs CreateDenom logic after the charge and all denom validation has been handled.
 // Made into a second function for genesis initialization.
 func (k Keeper) createDenomAfterValidation(ctx sdk.Context, creatorAddr string, denom string) (err error) {
-	denomMetaData := banktypes.Metadata{
-		DenomUnits: []*banktypes.DenomUnit{{
-			Denom:    denom,
-			Exponent: 0,
-		}},
-		Base: denom,
-	}
+	_, exists := k.bankKeeper.GetDenomMetaData(ctx, denom)
+	if !exists {
+		denomMetaData := banktypes.Metadata{
+			DenomUnits: []*banktypes.DenomUnit{{
+				Denom:    denom,
+				Exponent: 0,
+			}},
+			Base:    denom,
+			Name:    denom,
+			Symbol:  denom,
+			Display: denom,
+		}
 
-	k.bankKeeper.SetDenomMetaData(ctx, denomMetaData)
+		k.bankKeeper.SetDenomMetaData(ctx, denomMetaData)
+	}
 
 	authorityMetadata := types.DenomAuthorityMetadata{
 		Admin: creatorAddr,
@@ -70,7 +76,7 @@ func (k Keeper) validateCreateDenom(ctx sdk.Context, creatorAddr string, subdeno
 	return denom, nil
 }
 
-func (k Keeper) chargeForCreateDenom(ctx sdk.Context, creatorAddr string, subdenom string) (err error) {
+func (k Keeper) chargeForCreateDenom(ctx sdk.Context, creatorAddr string) (err error) {
 	params := k.GetParams(ctx)
 
 	// if DenomCreationFee is non-zero, transfer the tokens from the creator

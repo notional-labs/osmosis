@@ -3,10 +3,10 @@ package types_test
 import (
 	"testing"
 
-	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/stretchr/testify/require"
 
-	"github.com/osmosis-labs/osmosis/v16/x/concentrated-liquidity/types"
+	"github.com/osmosis-labs/osmosis/osmomath"
+	"github.com/osmosis-labs/osmosis/v20/x/concentrated-liquidity/types"
 )
 
 func TestValidateTicks(t *testing.T) {
@@ -30,15 +30,23 @@ func TestValidateTicks(t *testing.T) {
 			expectError: true,
 		},
 		"error: not a multiple of min tick": {
-			i:           []int64{types.MinTick + 1},
+			i:           []int64{types.MinInitializedTick + 1},
 			expectError: true,
 		},
 		"error: greater than max tick": {
 			i:           []int64{types.MaxTick * 2},
 			expectError: true,
 		},
+		"error: is max tick": {
+			i:           []int64{types.MaxTick},
+			expectError: true,
+		},
 		"error: smaller than min tick": {
-			i:           []int64{types.MinTick * 2},
+			i:           []int64{types.MinInitializedTick * 2},
+			expectError: true,
+		},
+		"error: is min tick": {
+			i:           []int64{types.MinInitializedTick},
 			expectError: true,
 		},
 	}
@@ -66,22 +74,22 @@ func TestValidateBalancerSharesDiscount(t *testing.T) {
 			i: types.DefaultBalancerSharesDiscount,
 		},
 		"zero discount rate": {
-			i: sdk.NewDec(0),
+			i: osmomath.NewDec(0),
 		},
 		"error: negative discount rate": {
-			i:           sdk.NewDec(-1),
+			i:           osmomath.NewDec(-1),
 			expectError: true,
 		},
 		"error: negative discount rate on boundary": {
-			i:           sdk.NewDecWithPrec(-1, 18),
+			i:           osmomath.NewDecWithPrec(-1, 18),
 			expectError: true,
 		},
 		"error: discount rate > 1": {
-			i:           sdk.NewDec(2),
+			i:           osmomath.NewDec(2),
 			expectError: true,
 		},
 		"error: discount rate > 1 on boundary": {
-			i:           sdk.NewDec(1).Add(sdk.NewDecWithPrec(1, 18)),
+			i:           osmomath.NewDec(1).Add(osmomath.NewDecWithPrec(1, 18)),
 			expectError: true,
 		},
 	}

@@ -1,6 +1,17 @@
 package types
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+
+	"github.com/osmosis-labs/osmosis/osmomath"
+)
+
+var (
+	ErrEmptyPoolIds                         = errors.New("pool id list cannot be empty")
+	ErrNoneOfCodeIdAndContractCodeSpecified = errors.New("both code id and byte code are unset. Only one must be specified.")
+	ErrBothOfCodeIdAndContractCodeSpecified = errors.New("both code id and byte code are set. Only one must be specified.")
+)
 
 type InvalidPoolTypeError struct {
 	ActualPool interface{}
@@ -18,11 +29,20 @@ func (e PoolNotFoundError) Error() string {
 	return fmt.Sprintf("pool not found. pool id (%d)", e.PoolId)
 }
 
-type InvalidLiquiditySetError struct {
-	PoolId     uint64
-	TokenCount int
+type CodeIdNotWhitelistedError struct {
+	CodeId uint64
 }
 
-func (e InvalidLiquiditySetError) Error() string {
-	return fmt.Sprintf("pool %d does not have enough liquidity tokens, need at least 2, had (%d)", e.PoolId, e.TokenCount)
+func (e CodeIdNotWhitelistedError) Error() string {
+	return fmt.Sprintf("cannot create coswasm pool with the given code id (%d). Please whitelist it via governance", e.CodeId)
+}
+
+type NegativeExcessiveTokenInAmountError struct {
+	TokenInMaxAmount       osmomath.Int
+	TokenInRequiredAmount  osmomath.Int
+	TokenInExcessiveAmount osmomath.Int
+}
+
+func (e NegativeExcessiveTokenInAmountError) Error() string {
+	return fmt.Sprintf("excessive token in amount cannot be negative. token in max amount = %d, token in required amount = %d, token in excessive amount = %d", e.TokenInMaxAmount, e.TokenInRequiredAmount, e.TokenInExcessiveAmount)
 }

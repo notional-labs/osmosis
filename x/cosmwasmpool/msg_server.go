@@ -5,8 +5,8 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/osmosis-labs/osmosis/v16/x/cosmwasmpool/model"
-	"github.com/osmosis-labs/osmosis/v16/x/cosmwasmpool/types"
+	"github.com/osmosis-labs/osmosis/v20/x/cosmwasmpool/model"
+	"github.com/osmosis-labs/osmosis/v20/x/cosmwasmpool/types"
 )
 
 type msgServer struct {
@@ -19,6 +19,12 @@ var (
 )
 
 func NewMsgServerImpl(keeper *Keeper) types.MsgServer {
+	return &msgServer{
+		keeper: keeper,
+	}
+}
+
+func NewMsgCreatorServerImpl(keeper *Keeper) model.MsgCreatorServer {
 	return &msgServer{
 		keeper: keeper,
 	}

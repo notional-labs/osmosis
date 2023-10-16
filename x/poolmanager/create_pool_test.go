@@ -6,13 +6,14 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/osmosis-labs/osmosis/v16/app/apptesting"
-	clmodel "github.com/osmosis-labs/osmosis/v16/x/concentrated-liquidity/model"
-	cwmodel "github.com/osmosis-labs/osmosis/v16/x/cosmwasmpool/model"
-	"github.com/osmosis-labs/osmosis/v16/x/gamm/pool-models/balancer"
-	stableswap "github.com/osmosis-labs/osmosis/v16/x/gamm/pool-models/stableswap"
-	gammtypes "github.com/osmosis-labs/osmosis/v16/x/gamm/types"
-	"github.com/osmosis-labs/osmosis/v16/x/poolmanager/types"
+	"github.com/osmosis-labs/osmosis/osmomath"
+	"github.com/osmosis-labs/osmosis/v20/app/apptesting"
+	clmodel "github.com/osmosis-labs/osmosis/v20/x/concentrated-liquidity/model"
+	cwmodel "github.com/osmosis-labs/osmosis/v20/x/cosmwasmpool/model"
+	"github.com/osmosis-labs/osmosis/v20/x/gamm/pool-models/balancer"
+	stableswap "github.com/osmosis-labs/osmosis/v20/x/gamm/pool-models/stableswap"
+	gammtypes "github.com/osmosis-labs/osmosis/v20/x/gamm/types"
+	"github.com/osmosis-labs/osmosis/v20/x/poolmanager/types"
 )
 
 func (s *KeeperTestSuite) TestPoolCreationFee() {
@@ -34,24 +35,24 @@ func (s *KeeperTestSuite) TestPoolCreationFee() {
 			name:            "no pool creation fee for default asset pool",
 			poolCreationFee: sdk.Coins{},
 			msg: balancer.NewMsgCreateBalancerPool(s.TestAccs[0], balancer.PoolParams{
-				SwapFee: sdk.NewDecWithPrec(1, 2),
-				ExitFee: sdk.ZeroDec(),
+				SwapFee: osmomath.NewDecWithPrec(1, 2),
+				ExitFee: osmomath.ZeroDec(),
 			}, apptesting.DefaultPoolAssets, ""),
 			expectPass: true,
 		}, {
 			name:            "nil pool creation fee on basic pool",
 			poolCreationFee: nil,
 			msg: balancer.NewMsgCreateBalancerPool(s.TestAccs[0], balancer.PoolParams{
-				SwapFee: sdk.NewDecWithPrec(1, 2),
-				ExitFee: sdk.ZeroDec(),
+				SwapFee: osmomath.NewDecWithPrec(1, 2),
+				ExitFee: osmomath.ZeroDec(),
 			}, apptesting.DefaultPoolAssets, ""),
 			expectPass: true,
 		}, {
 			name:            "attempt pool creation without sufficient funds for fees",
-			poolCreationFee: sdk.Coins{sdk.NewCoin("atom", sdk.NewInt(10000))},
+			poolCreationFee: sdk.Coins{sdk.NewCoin("atom", osmomath.NewInt(10000))},
 			msg: balancer.NewMsgCreateBalancerPool(s.TestAccs[0], balancer.PoolParams{
-				SwapFee: sdk.NewDecWithPrec(1, 2),
-				ExitFee: sdk.ZeroDec(),
+				SwapFee: osmomath.NewDecWithPrec(1, 2),
+				ExitFee: osmomath.ZeroDec(),
 			}, apptesting.DefaultPoolAssets, ""),
 			expectPass: false,
 		},
@@ -65,9 +66,9 @@ func (s *KeeperTestSuite) TestPoolCreationFee() {
 		poolmanagerKeeper := s.App.PoolManagerKeeper
 
 		// set pool creation fee
-		poolmanagerKeeper.SetParams(s.Ctx, types.Params{
-			PoolCreationFee: test.poolCreationFee,
-		})
+		newParams := params
+		newParams.PoolCreationFee = test.poolCreationFee
+		poolmanagerKeeper.SetParams(s.Ctx, newParams)
 
 		// fund sender test account
 		sender, err := sdk.AccAddressFromBech32(test.msg.Sender)
@@ -107,7 +108,8 @@ func (s *KeeperTestSuite) TestPoolCreationFee() {
 			s.Require().Equal(senderBal.String(), expectedSenderBal.String())
 
 			// check pool's liquidity is correctly increased
-			liquidity := gammKeeper.GetTotalLiquidity(s.Ctx)
+			liquidity, err := gammKeeper.GetTotalLiquidity(s.Ctx)
+			s.Require().NoError(err, "test: %v", test.name)
 			s.Require().Equal(expectedPoolTokens.String(), liquidity.String())
 		} else {
 			s.Require().Error(err, "test: %v", test.name)
@@ -118,43 +120,43 @@ func (s *KeeperTestSuite) TestPoolCreationFee() {
 // TestCreatePool tests that all possible pools are created correctly.
 func (s *KeeperTestSuite) TestCreatePool() {
 	var (
-		validBalancerPoolMsg = balancer.NewMsgCreateBalancerPool(s.TestAccs[0], balancer.NewPoolParams(sdk.ZeroDec(), sdk.ZeroDec(), nil), []balancer.PoolAsset{
+		validBalancerPoolMsg = balancer.NewMsgCreateBalancerPool(s.TestAccs[0], balancer.NewPoolParams(osmomath.ZeroDec(), osmomath.ZeroDec(), nil), []balancer.PoolAsset{
 			{
-				Token:  sdk.NewCoin(foo, defaultInitPoolAmount),
-				Weight: sdk.NewInt(1),
+				Token:  sdk.NewCoin(FOO, defaultInitPoolAmount),
+				Weight: osmomath.NewInt(1),
 			},
 			{
-				Token:  sdk.NewCoin(bar, defaultInitPoolAmount),
-				Weight: sdk.NewInt(1),
+				Token:  sdk.NewCoin(BAR, defaultInitPoolAmount),
+				Weight: osmomath.NewInt(1),
 			},
 		}, "")
 
-		invalidBalancerPoolMsg = balancer.NewMsgCreateBalancerPool(s.TestAccs[0], balancer.NewPoolParams(sdk.ZeroDec(), sdk.NewDecWithPrec(1, 2), nil), []balancer.PoolAsset{
+		invalidBalancerPoolMsg = balancer.NewMsgCreateBalancerPool(s.TestAccs[0], balancer.NewPoolParams(osmomath.ZeroDec(), osmomath.NewDecWithPrec(1, 2), nil), []balancer.PoolAsset{
 			{
-				Token:  sdk.NewCoin(foo, defaultInitPoolAmount),
-				Weight: sdk.NewInt(1),
+				Token:  sdk.NewCoin(FOO, defaultInitPoolAmount),
+				Weight: osmomath.NewInt(1),
 			},
 			{
-				Token:  sdk.NewCoin(bar, defaultInitPoolAmount),
-				Weight: sdk.NewInt(1),
+				Token:  sdk.NewCoin(BAR, defaultInitPoolAmount),
+				Weight: osmomath.NewInt(1),
 			},
 		}, "")
 
 		DefaultStableswapLiquidity = sdk.NewCoins(
-			sdk.NewCoin(foo, defaultInitPoolAmount),
-			sdk.NewCoin(bar, defaultInitPoolAmount),
+			sdk.NewCoin(FOO, defaultInitPoolAmount),
+			sdk.NewCoin(BAR, defaultInitPoolAmount),
 		)
 
-		validStableswapPoolMsg = stableswap.NewMsgCreateStableswapPool(s.TestAccs[0], stableswap.PoolParams{SwapFee: sdk.NewDec(0), ExitFee: sdk.NewDec(0)}, DefaultStableswapLiquidity, []uint64{}, "")
+		validStableswapPoolMsg = stableswap.NewMsgCreateStableswapPool(s.TestAccs[0], stableswap.PoolParams{SwapFee: osmomath.NewDec(0), ExitFee: osmomath.NewDec(0)}, DefaultStableswapLiquidity, []uint64{}, "")
 
-		invalidStableswapPoolMsg = stableswap.NewMsgCreateStableswapPool(s.TestAccs[0], stableswap.PoolParams{SwapFee: sdk.NewDec(0), ExitFee: sdk.NewDecWithPrec(1, 2)}, DefaultStableswapLiquidity, []uint64{}, "")
+		invalidStableswapPoolMsg = stableswap.NewMsgCreateStableswapPool(s.TestAccs[0], stableswap.PoolParams{SwapFee: osmomath.NewDec(0), ExitFee: osmomath.NewDecWithPrec(1, 2)}, DefaultStableswapLiquidity, []uint64{}, "")
 
-		validConcentratedPoolMsg = clmodel.NewMsgCreateConcentratedPool(s.TestAccs[0], foo, bar, 1, defaultPoolSpreadFactor)
+		validConcentratedPoolMsg = clmodel.NewMsgCreateConcentratedPool(s.TestAccs[0], FOO, BAR, 1, defaultPoolSpreadFactor)
 
 		validTransmuterCodeId = uint64(1)
 		validCWPoolMsg        = cwmodel.NewMsgCreateCosmWasmPool(validTransmuterCodeId, s.TestAccs[0], s.GetDefaultTransmuterInstantiateMsgBytes())
 
-		defaultFundAmount = sdk.NewCoins(sdk.NewCoin(foo, defaultInitPoolAmount.Mul(sdk.NewInt(2))), sdk.NewCoin(bar, defaultInitPoolAmount.Mul(sdk.NewInt(2))))
+		defaultFundAmount = sdk.NewCoins(sdk.NewCoin(FOO, defaultInitPoolAmount.Mul(osmomath.NewInt(2))), sdk.NewCoin(BAR, defaultInitPoolAmount.Mul(osmomath.NewInt(2))))
 	)
 
 	tests := []struct {
@@ -221,8 +223,6 @@ func (s *KeeperTestSuite) TestCreatePool() {
 
 	for i, tc := range tests {
 		s.Run(tc.name, func() {
-			tc := tc
-
 			if tc.isPermissionlessPoolCreationDisabled {
 				params := s.App.ConcentratedLiquidityKeeper.GetParams(s.Ctx)
 				params.IsPermissionlessPoolCreationEnabled = false
@@ -232,6 +232,7 @@ func (s *KeeperTestSuite) TestCreatePool() {
 			if tc.expectedModuleType == cosmwasmKeeperType {
 				codeId := s.StoreCosmWasmPoolContractCode(apptesting.TransmuterContractName)
 				s.Require().Equal(validTransmuterCodeId, codeId)
+				s.App.CosmwasmPoolKeeper.WhitelistCodeId(s.Ctx, codeId)
 			}
 
 			poolmanagerKeeper := s.App.PoolManagerKeeper
@@ -261,8 +262,6 @@ func (s *KeeperTestSuite) TestCreatePool() {
 
 // Tests that only poolmanager as a pool creator can create a pool via CreatePoolZeroLiquidityNoCreationFee
 func (s *KeeperTestSuite) TestCreatePoolZeroLiquidityNoCreationFee() {
-	s.SetupTest()
-
 	poolManagerModuleAcc := s.App.AccountKeeper.GetModuleAccount(s.Ctx, types.ModuleName)
 
 	withCreator := func(msg clmodel.MsgCreateConcentratedPool, address sdk.AccAddress) clmodel.MsgCreateConcentratedPool {
@@ -270,18 +269,18 @@ func (s *KeeperTestSuite) TestCreatePoolZeroLiquidityNoCreationFee() {
 		return msg
 	}
 
-	balancerPoolMsg := balancer.NewMsgCreateBalancerPool(poolManagerModuleAcc.GetAddress(), balancer.NewPoolParams(sdk.ZeroDec(), sdk.ZeroDec(), nil), []balancer.PoolAsset{
+	balancerPoolMsg := balancer.NewMsgCreateBalancerPool(poolManagerModuleAcc.GetAddress(), balancer.NewPoolParams(osmomath.ZeroDec(), osmomath.ZeroDec(), nil), []balancer.PoolAsset{
 		{
-			Token:  sdk.NewCoin(foo, defaultInitPoolAmount),
-			Weight: sdk.NewInt(1),
+			Token:  sdk.NewCoin(FOO, defaultInitPoolAmount),
+			Weight: osmomath.NewInt(1),
 		},
 		{
-			Token:  sdk.NewCoin(bar, defaultInitPoolAmount),
-			Weight: sdk.NewInt(1),
+			Token:  sdk.NewCoin(BAR, defaultInitPoolAmount),
+			Weight: osmomath.NewInt(1),
 		},
 	}, "")
 
-	concentratedPoolMsg := clmodel.NewMsgCreateConcentratedPool(poolManagerModuleAcc.GetAddress(), foo, bar, 1, defaultPoolSpreadFactor)
+	concentratedPoolMsg := clmodel.NewMsgCreateConcentratedPool(poolManagerModuleAcc.GetAddress(), FOO, BAR, 1, defaultPoolSpreadFactor)
 
 	tests := []struct {
 		name               string
@@ -308,14 +307,12 @@ func (s *KeeperTestSuite) TestCreatePoolZeroLiquidityNoCreationFee() {
 
 	for i, tc := range tests {
 		s.Run(tc.name, func() {
-			tc := tc
-
 			poolmanagerKeeper := s.App.PoolManagerKeeper
 			ctx := s.Ctx
 
 			// Note: this is necessary for gauge creation in the after pool created hook.
 			// There is a check requiring positive supply existing on-chain.
-			s.MintCoins(sdk.NewCoins(sdk.NewCoin("uosmo", sdk.OneInt())))
+			s.MintCoins(sdk.NewCoins(sdk.NewCoin("uosmo", osmomath.OneInt())))
 
 			pool, err := poolmanagerKeeper.CreateConcentratedPoolAsPoolManager(ctx, tc.msg)
 
@@ -393,8 +390,6 @@ func (s *KeeperTestSuite) TestSetAndGetAllPoolRoutes() {
 
 	for _, tc := range tests {
 		s.Run(tc.name, func() {
-			tc := tc
-
 			s.Setup()
 			poolManagerKeeper := s.App.PoolManagerKeeper
 
@@ -428,7 +423,6 @@ func (s *KeeperTestSuite) TestGetNextPoolIdAndIncrement() {
 
 	for _, tc := range tests {
 		s.Run(tc.name, func() {
-			tc := tc
 			s.Setup()
 
 			s.App.PoolManagerKeeper.SetNextPoolId(s.Ctx, tc.expectedNextPoolId)
@@ -479,7 +473,6 @@ func (s *KeeperTestSuite) TestValidateCreatedPool() {
 
 	for _, tc := range tests {
 		s.Run(tc.name, func() {
-			tc := tc
 			s.Setup()
 
 			// System under test.

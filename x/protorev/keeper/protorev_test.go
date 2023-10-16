@@ -3,7 +3,8 @@ package keeper_test
 import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/osmosis-labs/osmosis/v16/x/protorev/types"
+	"github.com/osmosis-labs/osmosis/osmomath"
+	"github.com/osmosis-labs/osmosis/v20/x/protorev/types"
 )
 
 // TestGetTokenPairArbRoutes tests the GetTokenPairArbRoutes function.
@@ -63,7 +64,7 @@ func (s *KeeperTestSuite) TestGetAllBaseDenoms() {
 	s.Require().Equal(3, len(baseDenoms))
 	s.Require().Equal(baseDenoms[0].Denom, types.OsmosisDenomination)
 	s.Require().Equal(baseDenoms[1].Denom, "Atom")
-	s.Require().Equal(baseDenoms[2].Denom, "test/3")
+	s.Require().Equal(baseDenoms[2].Denom, "ibc/0CD3A0285E1341859B5E86B6AB7682F023D03E97607CCC1DC95706411D866DF7")
 
 	// Should be able to delete all base denoms
 	s.App.ProtoRevKeeper.DeleteBaseDenoms(s.Ctx)
@@ -146,23 +147,23 @@ func (s *KeeperTestSuite) TestGetDeveloperFees() {
 	s.Require().Equal(sdk.Coin{}, atomFees)
 
 	// Should be able to set the fees
-	err = s.App.ProtoRevKeeper.SetDeveloperFees(s.Ctx, sdk.NewCoin(types.OsmosisDenomination, sdk.NewInt(100)))
+	err = s.App.ProtoRevKeeper.SetDeveloperFees(s.Ctx, sdk.NewCoin(types.OsmosisDenomination, osmomath.NewInt(100)))
 	s.Require().NoError(err)
-	err = s.App.ProtoRevKeeper.SetDeveloperFees(s.Ctx, sdk.NewCoin("Atom", sdk.NewInt(100)))
+	err = s.App.ProtoRevKeeper.SetDeveloperFees(s.Ctx, sdk.NewCoin("Atom", osmomath.NewInt(100)))
 	s.Require().NoError(err)
-	err = s.App.ProtoRevKeeper.SetDeveloperFees(s.Ctx, sdk.NewCoin("weth", sdk.NewInt(100)))
+	err = s.App.ProtoRevKeeper.SetDeveloperFees(s.Ctx, sdk.NewCoin("weth", osmomath.NewInt(100)))
 	s.Require().NoError(err)
 
 	// Should be able to get the fees
 	osmoFees, err = s.App.ProtoRevKeeper.GetDeveloperFees(s.Ctx, types.OsmosisDenomination)
 	s.Require().NoError(err)
-	s.Require().Equal(sdk.NewCoin(types.OsmosisDenomination, sdk.NewInt(100)), osmoFees)
+	s.Require().Equal(sdk.NewCoin(types.OsmosisDenomination, osmomath.NewInt(100)), osmoFees)
 	atomFees, err = s.App.ProtoRevKeeper.GetDeveloperFees(s.Ctx, "Atom")
 	s.Require().NoError(err)
-	s.Require().Equal(sdk.NewCoin("Atom", sdk.NewInt(100)), atomFees)
+	s.Require().Equal(sdk.NewCoin("Atom", osmomath.NewInt(100)), atomFees)
 	wethFees, err := s.App.ProtoRevKeeper.GetDeveloperFees(s.Ctx, "weth")
 	s.Require().NoError(err)
-	s.Require().Equal(sdk.NewCoin("weth", sdk.NewInt(100)), wethFees)
+	s.Require().Equal(sdk.NewCoin("weth", osmomath.NewInt(100)), wethFees)
 
 	fees, err = s.App.ProtoRevKeeper.GetAllDeveloperFees(s.Ctx)
 	s.Require().NoError(err)
@@ -173,13 +174,13 @@ func (s *KeeperTestSuite) TestGetDeveloperFees() {
 
 // TestDeleteDeveloperFees tests the DeleteDeveloperFees function.
 func (s *KeeperTestSuite) TestDeleteDeveloperFees() {
-	err := s.App.ProtoRevKeeper.SetDeveloperFees(s.Ctx, sdk.NewCoin(types.OsmosisDenomination, sdk.NewInt(100)))
+	err := s.App.ProtoRevKeeper.SetDeveloperFees(s.Ctx, sdk.NewCoin(types.OsmosisDenomination, osmomath.NewInt(100)))
 	s.Require().NoError(err)
 
 	// Should be able to get the fees
 	osmoFees, err := s.App.ProtoRevKeeper.GetDeveloperFees(s.Ctx, types.OsmosisDenomination)
 	s.Require().NoError(err)
-	s.Require().Equal(sdk.NewCoin(types.OsmosisDenomination, sdk.NewInt(100)), osmoFees)
+	s.Require().Equal(sdk.NewCoin(types.OsmosisDenomination, osmomath.NewInt(100)), osmoFees)
 
 	// Should be able to delete the fees
 	s.App.ProtoRevKeeper.DeleteDeveloperFees(s.Ctx, types.OsmosisDenomination)
@@ -305,21 +306,20 @@ func (s *KeeperTestSuite) TestGetMaxPointsPerBlock() {
 	s.Require().Error(err)
 }
 
-// TestGetPoolWeights tests the GetPoolWeights and SetPoolWeights functions.
-func (s *KeeperTestSuite) TestGetPoolWeights() {
-	// Should be initialized on genesis
-	poolWeights := s.App.ProtoRevKeeper.GetPoolWeights(s.Ctx)
-	s.Require().Equal(types.PoolWeights{StableWeight: 5, BalancerWeight: 2, ConcentratedWeight: 2}, poolWeights)
-
-	// Should be able to set the PoolWeights
-	newRouteWeights := types.PoolWeights{
-		StableWeight:       10,
-		BalancerWeight:     2,
-		ConcentratedWeight: 22,
+// TestGetInfoByPoolType tests the GetInfoByPoolType and SetInfoByPoolType functions.
+func (s *KeeperTestSuite) TestGetInfoByPoolType() {
+	// Should be able to set the InfoByPoolType
+	newRouteWeights := types.DefaultPoolTypeInfo
+	newRouteWeights.Balancer.Weight = 100
+	newRouteWeights.Cosmwasm.WeightMaps = []types.WeightMap{
+		{
+			ContractAddress: "contractAddress",
+			Weight:          1,
+		},
 	}
 
-	s.App.ProtoRevKeeper.SetPoolWeights(s.Ctx, newRouteWeights)
+	s.App.ProtoRevKeeper.SetInfoByPoolType(s.Ctx, newRouteWeights)
 
-	poolWeights = s.App.ProtoRevKeeper.GetPoolWeights(s.Ctx)
+	poolWeights := s.App.ProtoRevKeeper.GetInfoByPoolType(s.Ctx)
 	s.Require().Equal(newRouteWeights, poolWeights)
 }

@@ -3,13 +3,18 @@ package concentrated_liquidity_test
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	cl "github.com/osmosis-labs/osmosis/v16/x/concentrated-liquidity"
-	clmodel "github.com/osmosis-labs/osmosis/v16/x/concentrated-liquidity/model"
-	"github.com/osmosis-labs/osmosis/v16/x/concentrated-liquidity/types"
-	poolmanagertypes "github.com/osmosis-labs/osmosis/v16/x/poolmanager/types"
+	"github.com/osmosis-labs/osmosis/osmomath"
+	cl "github.com/osmosis-labs/osmosis/v20/x/concentrated-liquidity"
+	clmodel "github.com/osmosis-labs/osmosis/v20/x/concentrated-liquidity/model"
+	"github.com/osmosis-labs/osmosis/v20/x/concentrated-liquidity/types"
+	"github.com/osmosis-labs/osmosis/v20/x/gamm/pool-models/balancer"
+	lockuptypes "github.com/osmosis-labs/osmosis/v20/x/lockup/types"
+	poolmanagertypes "github.com/osmosis-labs/osmosis/v20/x/poolmanager/types"
+	sftypes "github.com/osmosis-labs/osmosis/v20/x/superfluid/types"
 )
 
 func (s *KeeperTestSuite) TestInitializePool() {
@@ -24,7 +29,7 @@ func (s *KeeperTestSuite) TestInitializePool() {
 	s.Require().NoError(err)
 
 	// Create a concentrated liquidity pool with unauthorized spread factor
-	invalidSpreadFactor := sdk.MustNewDecFromStr("0.1")
+	invalidSpreadFactor := osmomath.MustNewDecFromStr("0.1")
 	invalidSpreadFactorConcentratedPool, err := clmodel.NewConcentratedLiquidityPool(3, ETH, USDC, DefaultTickSpacing, invalidSpreadFactor)
 	s.Require().NoError(err)
 
@@ -35,17 +40,41 @@ func (s *KeeperTestSuite) TestInitializePool() {
 
 	validCreatorAddress := s.TestAccs[0]
 
+	poolmanagerModuleAccount := s.App.AccountKeeper.GetModuleAccount(s.Ctx, poolmanagertypes.ModuleName).GetAddress()
+
 	tests := []struct {
-		name                      string
-		poolI                     poolmanagertypes.PoolI
-		authorizedDenomsOverwrite []string
-		creatorAddress            sdk.AccAddress
-		expectedErr               error
+		name                               string
+		poolI                              poolmanagertypes.PoolI
+		authorizedDenomsOverwrite          []string
+		unrestrictedPoolCreatorWhitelist   []string
+		permissionlessPoolCreationDisabled bool
+		creatorAddress                     sdk.AccAddress
+		expectedErr                        error
 	}{
 		{
 			name:           "Happy path",
 			poolI:          validPoolI,
 			creatorAddress: validCreatorAddress,
+		},
+		{
+			name:                               "Permissionless pool creation disabled",
+			poolI:                              validPoolI,
+			permissionlessPoolCreationDisabled: true,
+			creatorAddress:                     validCreatorAddress,
+			expectedErr:                        types.ErrPermissionlessPoolCreationDisabled,
+		},
+		{
+			name:                               "bypass disabled permissionless pool creation check because poolmanager module account",
+			poolI:                              validPoolI,
+			permissionlessPoolCreationDisabled: true,
+			creatorAddress:                     poolmanagerModuleAccount,
+		},
+		{
+			name:                               "bypass disabled permissionless pool creation check because of whitelisted bypass",
+			poolI:                              validPoolI,
+			permissionlessPoolCreationDisabled: true,
+			creatorAddress:                     validCreatorAddress,
+			unrestrictedPoolCreatorWhitelist:   []string{validCreatorAddress.String()},
 		},
 		{
 			name:           "Wrong pool type: empty pool interface that doesn't implement ConcentratedPoolExtension",
@@ -74,15 +103,44 @@ func (s *KeeperTestSuite) TestInitializePool() {
 			creatorAddress:            validCreatorAddress,
 			expectedErr:               types.UnauthorizedQuoteDenomError{ProvidedQuoteDenom: USDC, AuthorizedQuoteDenoms: []string{"otherDenom"}},
 		},
+		{
+			name:                      "bypass unauthorized quote denom check because poolmanager module account",
+			poolI:                     validPoolI,
+			authorizedDenomsOverwrite: []string{"otherDenom"},
+			// despite the quote denom not being authorized, will still
+			// pass because its coming from the poolmanager module account
+			creatorAddress: poolmanagerModuleAccount,
+		},
+		{
+			name:                      "bypass unauthorized quote denom check because of whitelisted bypass",
+			poolI:                     validPoolI,
+			authorizedDenomsOverwrite: []string{"otherDenom"},
+			// despite the quote denom not being authorized, will still
+			// pass because its coming from a whitelisted pool creator
+			unrestrictedPoolCreatorWhitelist: []string{validCreatorAddress.String()},
+			creatorAddress:                   validCreatorAddress,
+		},
 	}
 
 	for _, test := range tests {
 		s.Run(test.name, func() {
 			s.SetupTest()
 
-			if len(test.authorizedDenomsOverwrite) > 0 {
+			if test.permissionlessPoolCreationDisabled {
 				params := s.App.ConcentratedLiquidityKeeper.GetParams(s.Ctx)
+				params.IsPermissionlessPoolCreationEnabled = false
+				s.App.ConcentratedLiquidityKeeper.SetParams(s.Ctx, params)
+			}
+
+			if len(test.authorizedDenomsOverwrite) > 0 {
+				params := s.App.PoolManagerKeeper.GetParams(s.Ctx)
 				params.AuthorizedQuoteDenoms = test.authorizedDenomsOverwrite
+				s.App.PoolManagerKeeper.SetParams(s.Ctx, params)
+			}
+
+			if len(test.unrestrictedPoolCreatorWhitelist) > 0 {
+				params := s.App.ConcentratedLiquidityKeeper.GetParams(s.Ctx)
+				params.UnrestrictedPoolCreatorWhitelist = test.unrestrictedPoolCreatorWhitelist
 				s.App.ConcentratedLiquidityKeeper.SetParams(s.Ctx, params)
 			}
 
@@ -240,19 +298,24 @@ func (s *KeeperTestSuite) TestCalculateSpotPrice() {
 	spotPrice, err := s.App.ConcentratedLiquidityKeeper.CalculateSpotPrice(s.Ctx, poolId, ETH, USDC)
 	s.Require().Error(err)
 	s.Require().ErrorAs(err, &types.NoSpotPriceWhenNoLiquidityError{PoolId: poolId})
-	s.Require().Equal(sdk.Dec{}, spotPrice)
+	s.Require().Equal(osmomath.BigDec{}, spotPrice)
 
 	// set up default position to have proper spot price
 	s.SetupDefaultPosition(defaultPoolId)
 
-	spotPriceBaseUSDC, err := s.App.ConcentratedLiquidityKeeper.CalculateSpotPrice(s.Ctx, poolId, ETH, USDC)
-	s.Require().NoError(err)
-	s.Require().Equal(spotPriceBaseUSDC, DefaultCurrSqrtPrice.Power(2))
-
-	// test that we have correct values for reversed quote asset and base asset
+	// ETH is token0 so its price will be the DefaultCurrSqrtPrice squared
 	spotPriceBaseETH, err := s.App.ConcentratedLiquidityKeeper.CalculateSpotPrice(s.Ctx, poolId, USDC, ETH)
 	s.Require().NoError(err)
-	s.Require().Equal(spotPriceBaseETH, sdk.OneDec().Quo(DefaultCurrSqrtPrice.Power(2)))
+	// TODO: remove Dec truncation before https://github.com/osmosis-labs/osmosis/issues/5726 is complete
+	// Currently exists for state-compatibility with v19.x
+	s.Require().Equal(spotPriceBaseETH.Dec(), DefaultCurrSqrtPrice.PowerInteger(2).Dec())
+
+	// test that we have correct values for reversed quote asset and base asset
+	spotPriceBaseUSDC, err := s.App.ConcentratedLiquidityKeeper.CalculateSpotPrice(s.Ctx, poolId, ETH, USDC)
+	s.Require().NoError(err)
+	// TODO: remove Dec truncation before https://github.com/osmosis-labs/osmosis/issues/5726 is complete
+	// Currently exists for state-compatibility with v19.x
+	s.Require().Equal(spotPriceBaseUSDC.Dec(), osmomath.OneBigDec().Quo(DefaultCurrSqrtPrice.PowerInteger(2)).Dec())
 
 	// try getting spot price from a non-existent pool
 	spotPrice, err = s.App.ConcentratedLiquidityKeeper.CalculateSpotPrice(s.Ctx, poolId+1, USDC, ETH)
@@ -265,7 +328,7 @@ func (s *KeeperTestSuite) TestValidateSpreadFactor() {
 	params := s.App.ConcentratedLiquidityKeeper.GetParams(s.Ctx)
 	tests := []struct {
 		name         string
-		spreadFactor sdk.Dec
+		spreadFactor osmomath.Dec
 		expectValid  bool
 	}{
 		{
@@ -275,7 +338,7 @@ func (s *KeeperTestSuite) TestValidateSpreadFactor() {
 		},
 		{
 			name:         "Invalid spread factor",
-			spreadFactor: params.AuthorizedSpreadFactors[0].Add(sdk.SmallestDec()),
+			spreadFactor: params.AuthorizedSpreadFactors[0].Add(osmomath.SmallestDec()),
 			expectValid:  false,
 		},
 	}
@@ -326,14 +389,14 @@ func (s *KeeperTestSuite) TestSetPool() {
 		Address:              s.TestAccs[0].String(),
 		IncentivesAddress:    s.TestAccs[1].String(),
 		Id:                   1,
-		CurrentTickLiquidity: sdk.ZeroDec(),
+		CurrentTickLiquidity: osmomath.ZeroDec(),
 		Token0:               ETH,
 		Token1:               USDC,
-		CurrentSqrtPrice:     sdk.OneDec(),
+		CurrentSqrtPrice:     osmomath.OneBigDec(),
 		CurrentTick:          0,
 		TickSpacing:          DefaultTickSpacing,
 		ExponentAtPriceOne:   -6,
-		SpreadFactor:         sdk.MustNewDecFromStr("0.003"),
+		SpreadFactor:         osmomath.MustNewDecFromStr("0.003"),
 		LastLiquidityUpdate:  s.Ctx.BlockTime(),
 	}
 	tests := []struct {
@@ -464,11 +527,11 @@ func (s *KeeperTestSuite) TestDecreaseConcentratedPoolTickSpacing() {
 			concentratedPool := s.PrepareConcentratedPoolWithCoinsAndFullRangePosition(ETH, USDC)
 
 			// Create a position in the pool that is divisible by the tick spacing
-			_, _, _, _, _, _, _, err := s.App.ConcentratedLiquidityKeeper.CreatePosition(s.Ctx, concentratedPool.GetId(), owner, DefaultCoins, sdk.ZeroInt(), sdk.ZeroInt(), -100, 100)
+			_, err := s.App.ConcentratedLiquidityKeeper.CreatePosition(s.Ctx, concentratedPool.GetId(), owner, DefaultCoins, osmomath.ZeroInt(), osmomath.ZeroInt(), -100, 100)
 			s.Require().NoError(err)
 
 			// Attempt to create a position that is not divisible by the tick spacing
-			_, _, _, _, _, _, _, err = s.App.ConcentratedLiquidityKeeper.CreatePosition(s.Ctx, concentratedPool.GetId(), owner, DefaultCoins, sdk.ZeroInt(), sdk.ZeroInt(), test.position.lowerTick, test.position.upperTick)
+			_, err = s.App.ConcentratedLiquidityKeeper.CreatePosition(s.Ctx, concentratedPool.GetId(), owner, DefaultCoins, osmomath.ZeroInt(), osmomath.ZeroInt(), test.position.lowerTick, test.position.upperTick)
 			s.Require().Error(err)
 
 			// Alter the tick spacing of the pool
@@ -481,7 +544,7 @@ func (s *KeeperTestSuite) TestDecreaseConcentratedPoolTickSpacing() {
 			s.Require().NoError(err)
 
 			// Attempt to create a position that was previously not divisible by the tick spacing but now is
-			_, _, _, _, _, _, _, err = s.App.ConcentratedLiquidityKeeper.CreatePosition(s.Ctx, concentratedPool.GetId(), owner, DefaultCoins, sdk.ZeroInt(), sdk.ZeroInt(), test.position.lowerTick, test.position.upperTick)
+			_, err = s.App.ConcentratedLiquidityKeeper.CreatePosition(s.Ctx, concentratedPool.GetId(), owner, DefaultCoins, osmomath.ZeroInt(), osmomath.ZeroInt(), test.position.lowerTick, test.position.upperTick)
 			if test.expectedCreatePositionErr != nil {
 				s.Require().Error(err)
 				s.Require().ErrorContains(err, test.expectedCreatePositionErr.Error())
@@ -494,9 +557,9 @@ func (s *KeeperTestSuite) TestDecreaseConcentratedPoolTickSpacing() {
 
 func (s *KeeperTestSuite) TestGetTotalPoolLiquidity() {
 	var (
-		defaultPoolCoinOne = sdk.NewCoin(USDC, sdk.OneInt())
-		defaultPoolCoinTwo = sdk.NewCoin(ETH, sdk.NewInt(2))
-		nonPoolCool        = sdk.NewCoin("uosmo", sdk.NewInt(3))
+		defaultPoolCoinOne = sdk.NewCoin(USDC, osmomath.OneInt())
+		defaultPoolCoinTwo = sdk.NewCoin(ETH, osmomath.NewInt(2))
+		nonPoolCool        = sdk.NewCoin("uosmo", osmomath.NewInt(3))
 
 		defaultCoins = sdk.NewCoins(defaultPoolCoinOne, defaultPoolCoinTwo)
 	)
@@ -564,6 +627,145 @@ func (s *KeeperTestSuite) TestGetTotalPoolLiquidity() {
 
 			s.Require().NoError(err)
 			s.Require().Equal(tc.expectedResult, actual)
+		})
+	}
+}
+
+func (s *KeeperTestSuite) TestValidateTickSpacingUpdate() {
+	tests := []struct {
+		name                     string
+		newTickSpacing           uint64
+		expectedValidationResult bool
+	}{
+		{
+			name:                     "happy case: reduce tick spacing to smaller tick",
+			newTickSpacing:           1,
+			expectedValidationResult: true,
+		},
+		{
+			name:                     "validation fail: try reducing unauthorized tick spacing",
+			newTickSpacing:           3,
+			expectedValidationResult: false,
+		},
+		{
+			name:                     "validation fail: try increasing tick spacing",
+			newTickSpacing:           500,
+			expectedValidationResult: false,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		s.Run(tc.name, func() {
+			s.SetupTest()
+
+			// Create default CL pool
+			// default pool tick spacing is 100.
+			pool := s.PrepareConcentratedPool()
+
+			params := types.DefaultParams()
+			validationResult := s.App.ConcentratedLiquidityKeeper.ValidateTickSpacingUpdate(s.Ctx, pool, params, tc.newTickSpacing)
+			if tc.expectedValidationResult {
+				s.Require().True(validationResult)
+			} else {
+				s.Require().False(validationResult)
+			}
+		})
+	}
+}
+
+func (s *KeeperTestSuite) TestGetUserUnbondingPositions() {
+	var (
+		defaultFooAsset balancer.PoolAsset = balancer.PoolAsset{
+			Weight: osmomath.NewInt(100),
+			Token:  sdk.NewCoin("foo", osmomath.NewInt(10000)),
+		}
+		defaultBondDenomAsset balancer.PoolAsset = balancer.PoolAsset{
+			Weight: osmomath.NewInt(100),
+			Token:  sdk.NewCoin(sdk.DefaultBondDenom, osmomath.NewInt(10000)),
+		}
+		defaultPoolAssets []balancer.PoolAsset = []balancer.PoolAsset{defaultFooAsset, defaultBondDenomAsset}
+		defaultAddress                         = s.TestAccs[0]
+		defaultFunds                           = sdk.NewCoins(defaultPoolAssets[0].Token, sdk.NewCoin("stake", osmomath.NewInt(5000000000)))
+		defaultBlockTime                       = time.Unix(1, 1).UTC()
+		defaultLockedAmt                       = sdk.NewCoins(sdk.NewCoin("cl/pool/1", osmomath.NewInt(10000)))
+	)
+
+	tests := []struct {
+		name           string
+		address        sdk.AccAddress
+		expectedResult []clmodel.PositionWithPeriodLock
+		expectedErr    error
+	}{
+		{
+			name:    "happy path",
+			address: defaultAddress,
+			expectedResult: []clmodel.PositionWithPeriodLock{
+				{
+					Position: clmodel.Position{
+						PositionId: 3,
+						Address:    defaultAddress.String(),
+						PoolId:     1,
+						LowerTick:  types.MinInitializedTick,
+						UpperTick:  types.MaxTick,
+						JoinTime:   defaultBlockTime,
+						Liquidity:  osmomath.MustNewDecFromStr("10000.000000000000001000"),
+					},
+					Locks: lockuptypes.PeriodLock{
+
+						ID:       2,
+						Owner:    defaultAddress.String(),
+						Duration: time.Hour,
+						EndTime:  defaultBlockTime.Add(time.Hour),
+						Coins:    defaultLockedAmt,
+					},
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			s.Ctx = s.Ctx.WithBlockTime(defaultBlockTime)
+
+			clPool := s.PrepareConcentratedPoolWithCoinsAndFullRangePosition(defaultFunds[0].Denom, defaultFunds[1].Denom)
+			clLockupDenom := types.GetConcentratedLockupDenomFromPoolId(clPool.GetId())
+			err := s.App.SuperfluidKeeper.AddNewSuperfluidAsset(s.Ctx, sftypes.SuperfluidAsset{
+				Denom:     clLockupDenom,
+				AssetType: sftypes.SuperfluidAssetTypeConcentratedShare,
+			})
+			s.Require().NoError(err)
+
+			// Create 3 locked positions
+			for i := 0; i < 3; i++ {
+				_, _, err := s.App.ConcentratedLiquidityKeeper.CreateFullRangePositionLocked(s.Ctx, clPool.GetId(), defaultAddress, defaultFunds, time.Hour)
+				s.Require().NoError(err)
+			}
+
+			// The query should return nothing since none of the locks are unlocking
+			positionsWithPeriodLock, err := s.App.ConcentratedLiquidityKeeper.GetUserUnbondingPositions(s.Ctx, tc.address)
+			s.Require().NoError(err)
+			s.Require().Nil(positionsWithPeriodLock)
+
+			// Begin unlocking the second lock only
+			lock, err := s.App.LockupKeeper.GetLockByID(s.Ctx, 2)
+			s.Require().NoError(err)
+			_, err = s.App.LockupKeeper.BeginUnlock(s.Ctx, 2, lock.Coins)
+			s.Require().NoError(err)
+
+			// The query should return the second lock only
+			positionsWithPeriodLock, err = s.App.ConcentratedLiquidityKeeper.GetUserUnbondingPositions(s.Ctx, tc.address)
+			if tc.expectedErr != nil {
+				s.Require().Error(err)
+				s.Require().ErrorIs(err, tc.expectedErr)
+				s.Require().Nil(positionsWithPeriodLock)
+				return
+			}
+
+			s.Require().NoError(err)
+			s.Require().Equal(tc.expectedResult, positionsWithPeriodLock)
 		})
 	}
 }

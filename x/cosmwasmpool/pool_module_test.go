@@ -7,16 +7,21 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/osmosis-labs/osmosis/v16/app/apptesting"
-	clmodel "github.com/osmosis-labs/osmosis/v16/x/concentrated-liquidity/model"
-	"github.com/osmosis-labs/osmosis/v16/x/cosmwasmpool/model"
-	"github.com/osmosis-labs/osmosis/v16/x/cosmwasmpool/types"
-	poolmanagertypes "github.com/osmosis-labs/osmosis/v16/x/poolmanager/types"
+	"github.com/osmosis-labs/osmosis/osmomath"
+	"github.com/osmosis-labs/osmosis/v20/app/apptesting"
+	clmodel "github.com/osmosis-labs/osmosis/v20/x/concentrated-liquidity/model"
+	"github.com/osmosis-labs/osmosis/v20/x/cosmwasmpool/model"
+	"github.com/osmosis-labs/osmosis/v20/x/cosmwasmpool/types"
+	poolmanagertypes "github.com/osmosis-labs/osmosis/v20/x/poolmanager/types"
 )
 
 const (
-	denomA = apptesting.DefaultTransmuterDenomA
-	denomB = apptesting.DefaultTransmuterDenomB
+	denomA        = apptesting.DefaultTransmuterDenomA
+	denomB        = apptesting.DefaultTransmuterDenomB
+	validCodeId   = uint64(1)
+	invalidCodeId = validCodeId + 1
+	defaultPoolId = uint64(1)
+	nonZeroFeeStr = "0.01"
 )
 
 type PoolModuleSuite struct {
@@ -24,10 +29,8 @@ type PoolModuleSuite struct {
 }
 
 var (
-	defaultPoolId       = uint64(1)
-	defaultAmount       = sdk.NewInt(100)
+	defaultAmount       = osmomath.NewInt(100)
 	initalDefaultSupply = sdk.NewCoins(sdk.NewCoin(denomA, defaultAmount), sdk.NewCoin(denomB, defaultAmount))
-	nonZeroFeeStr       = "0.01"
 
 	defaultDenoms = []string{denomA, denomB}
 )
@@ -36,34 +39,36 @@ func TestPoolModuleSuite(t *testing.T) {
 	suite.Run(t, new(PoolModuleSuite))
 }
 
-func (suite *PoolModuleSuite) SetupTest() {
-	suite.Setup()
-}
-
 func (s *PoolModuleSuite) TestInitializePool() {
-	var (
-		validCodeId          = uint64(1)
-		invalidCodeId        = validCodeId + 1
-		validInstantitateMsg = s.GetTransmuterInstantiateMsgBytes(defaultDenoms)
-	)
+	validInstantitateMsg := s.GetTransmuterInstantiateMsgBytes(defaultDenoms)
 
 	tests := map[string]struct {
 		codeid            uint64
 		instantiateMsg    []byte
 		isInvalidPoolType bool
+		isWhitelisted     bool
 		expectError       bool
 	}{
-		"valid pool": {
+		"valid pool, whitelisted": {
 			codeid:         validCodeId,
 			instantiateMsg: validInstantitateMsg,
+			isWhitelisted:  true,
+		},
+		"valid pool, not whitelisted": {
+			codeid:         validCodeId,
+			instantiateMsg: validInstantitateMsg,
+			isWhitelisted:  false,
+			expectError:    true,
 		},
 		"error: invalid code id": {
 			codeid:         invalidCodeId,
 			instantiateMsg: validInstantitateMsg,
+			isWhitelisted:  true,
 			expectError:    true,
 		},
 		"invalid pool type": {
 			isInvalidPoolType: true,
+			isWhitelisted:     true,
 			expectError:       true,
 		},
 	}
@@ -71,7 +76,7 @@ func (s *PoolModuleSuite) TestInitializePool() {
 	for name, tc := range tests {
 		tc := tc
 		s.Run(name, func() {
-			s.SetupTest()
+			s.Setup()
 			cosmwasmPoolKeeper := s.App.CosmwasmPoolKeeper
 
 			s.StoreCosmWasmPoolContractCode(apptesting.TransmuterContractName)
@@ -83,6 +88,10 @@ func (s *PoolModuleSuite) TestInitializePool() {
 				testPool = s.PrepareConcentratedPool()
 			}
 
+			if tc.isWhitelisted {
+				s.App.CosmwasmPoolKeeper.WhitelistCodeId(s.Ctx, tc.codeid)
+			}
+
 			err := cosmwasmPoolKeeper.InitializePool(s.Ctx, testPool, s.TestAccs[0])
 
 			if tc.expectError {
@@ -91,7 +100,7 @@ func (s *PoolModuleSuite) TestInitializePool() {
 			}
 			s.Require().NoError(err)
 
-			pool, err := cosmwasmPoolKeeper.GetPool(s.Ctx, defaultPoolId)
+			pool, err := cosmwasmPoolKeeper.GetPoolById(s.Ctx, defaultPoolId)
 			s.Require().NoError(err)
 
 			cosmWasmPool, ok := pool.(*model.Pool)
@@ -137,7 +146,7 @@ func (s *PoolModuleSuite) TestGetPoolDenoms() {
 	for name, tc := range tests {
 		tc := tc
 		s.Run(name, func() {
-			s.SetupTest()
+			s.Setup()
 			cosmwasmPoolKeeper := s.App.CosmwasmPoolKeeper
 
 			s.PrepareCosmWasmPool()
@@ -160,8 +169,8 @@ func (s *PoolModuleSuite) TestCalcOutAmtGivenIn_SwapOutAmtGivenIn() {
 		initialCoins      sdk.Coins
 		tokenIn           sdk.Coin
 		tokenOutDenom     string
-		tokenOutMinAmount sdk.Int
-		swapFee           sdk.Dec
+		tokenOutMinAmount osmomath.Int
+		swapFee           osmomath.Dec
 		isInvalidPool     bool
 
 		expectedTokenOut     sdk.Coin
@@ -169,34 +178,34 @@ func (s *PoolModuleSuite) TestCalcOutAmtGivenIn_SwapOutAmtGivenIn() {
 	}{
 		"calc amount less than supply": {
 			initialCoins:     initalDefaultSupply,
-			tokenIn:          sdk.NewCoin(denomA, defaultAmount.Sub(sdk.OneInt())),
+			tokenIn:          sdk.NewCoin(denomA, defaultAmount.Sub(osmomath.OneInt())),
 			tokenOutDenom:    denomB,
-			expectedTokenOut: sdk.NewCoin(denomB, defaultAmount.Sub(sdk.OneInt())),
-			swapFee:          sdk.ZeroDec(),
+			expectedTokenOut: sdk.NewCoin(denomB, defaultAmount.Sub(osmomath.OneInt())),
+			swapFee:          osmomath.ZeroDec(),
 		},
 		"calc amount equal to supply": {
 			initialCoins:     initalDefaultSupply,
 			tokenIn:          sdk.NewCoin(denomA, defaultAmount),
 			tokenOutDenom:    denomB,
 			expectedTokenOut: sdk.NewCoin(denomB, defaultAmount),
-			swapFee:          sdk.ZeroDec(),
+			swapFee:          osmomath.ZeroDec(),
 		},
 		"calc amount greater than supply": {
 			initialCoins:         initalDefaultSupply,
-			tokenIn:              sdk.NewCoin(denomA, defaultAmount.Add(sdk.OneInt())),
+			tokenIn:              sdk.NewCoin(denomA, defaultAmount.Add(osmomath.OneInt())),
 			tokenOutDenom:        denomB,
-			expectedErrorMessage: fmt.Sprintf("Insufficient pool asset: required: %s, available: %s", sdk.NewCoin(denomB, defaultAmount.Add(sdk.OneInt())), sdk.NewCoin(denomB, defaultAmount)),
+			expectedErrorMessage: fmt.Sprintf("Insufficient pool asset: required: %s, available: %s", sdk.NewCoin(denomB, defaultAmount.Add(osmomath.OneInt())), sdk.NewCoin(denomB, defaultAmount)),
 		},
 		"non-zero swap fee": {
 			initialCoins:         initalDefaultSupply,
-			tokenIn:              sdk.NewCoin(denomA, defaultAmount.Sub(sdk.OneInt())),
+			tokenIn:              sdk.NewCoin(denomA, defaultAmount.Sub(osmomath.OneInt())),
 			tokenOutDenom:        denomB,
-			swapFee:              sdk.MustNewDecFromStr(nonZeroFeeStr),
-			expectedErrorMessage: fmt.Sprintf("Invalid swap fee: expected: %s, actual: %s", sdk.ZeroInt(), nonZeroFeeStr),
+			swapFee:              osmomath.MustNewDecFromStr(nonZeroFeeStr),
+			expectedErrorMessage: fmt.Sprintf("Invalid swap fee: expected: %s, actual: %s", osmomath.ZeroInt(), nonZeroFeeStr),
 		},
 		"invalid pool given": {
 			initialCoins:  sdk.NewCoins(sdk.NewCoin(denomA, defaultAmount), sdk.NewCoin(denomB, defaultAmount)),
-			tokenIn:       sdk.NewCoin(denomA, defaultAmount.Sub(sdk.OneInt())),
+			tokenIn:       sdk.NewCoin(denomA, defaultAmount.Sub(osmomath.OneInt())),
 			tokenOutDenom: denomB,
 			isInvalidPool: true,
 
@@ -209,13 +218,11 @@ func (s *PoolModuleSuite) TestCalcOutAmtGivenIn_SwapOutAmtGivenIn() {
 	for name, tc := range tests {
 		tc := tc
 		s.Run(name, func() {
-			s.SetupTest()
+			s.Setup()
 
 			cosmwasmPoolKeeper := s.App.CosmwasmPoolKeeper
 
-			// fund pool joiner
 			s.FundAcc(s.TestAccs[0], tc.initialCoins)
-
 			// get initial denom from coins specified in the test case
 			initialDenoms := []string{}
 			for _, coin := range tc.initialCoins {
@@ -283,8 +290,8 @@ func (s *PoolModuleSuite) TestCalcInAmtGivenOut_SwapInAmtGivenOut() {
 		initialCoins     sdk.Coins
 		tokenOut         sdk.Coin
 		tokenInDenom     string
-		tokenInMaxAmount sdk.Int
-		swapFee          sdk.Dec
+		tokenInMaxAmount osmomath.Int
+		swapFee          osmomath.Dec
 		isInvalidPool    bool
 
 		expectedTokenIn      sdk.Coin
@@ -292,11 +299,11 @@ func (s *PoolModuleSuite) TestCalcInAmtGivenOut_SwapInAmtGivenOut() {
 	}{
 		"calc amount less than supply": {
 			initialCoins:     initalDefaultSupply,
-			tokenOut:         sdk.NewCoin(denomA, defaultAmount.Sub(sdk.OneInt())),
+			tokenOut:         sdk.NewCoin(denomA, defaultAmount.Sub(osmomath.OneInt())),
 			tokenInDenom:     denomB,
-			expectedTokenIn:  sdk.NewCoin(denomB, defaultAmount.Sub(sdk.OneInt())),
+			expectedTokenIn:  sdk.NewCoin(denomB, defaultAmount.Sub(osmomath.OneInt())),
 			tokenInMaxAmount: defaultAmount,
-			swapFee:          sdk.ZeroDec(),
+			swapFee:          osmomath.ZeroDec(),
 		},
 		"calc amount equal to supply": {
 			initialCoins:     initalDefaultSupply,
@@ -304,26 +311,29 @@ func (s *PoolModuleSuite) TestCalcInAmtGivenOut_SwapInAmtGivenOut() {
 			tokenInDenom:     denomB,
 			expectedTokenIn:  sdk.NewCoin(denomB, defaultAmount),
 			tokenInMaxAmount: defaultAmount,
-			swapFee:          sdk.ZeroDec(),
+			swapFee:          osmomath.ZeroDec(),
 		},
 		"calc amount greater than supply": {
 			initialCoins:         initalDefaultSupply,
-			tokenOut:             sdk.NewCoin(denomA, defaultAmount.Add(sdk.OneInt())),
+			tokenOut:             sdk.NewCoin(denomA, defaultAmount.Add(osmomath.OneInt())),
 			tokenInDenom:         denomB,
-			expectedErrorMessage: fmt.Sprintf("Insufficient pool asset: required: %s, available: %s", sdk.NewCoin(denomA, defaultAmount.Add(sdk.OneInt())), sdk.NewCoin(denomA, defaultAmount)),
+			tokenInMaxAmount:     defaultAmount.Sub(osmomath.OneInt()),
+			expectedErrorMessage: fmt.Sprintf("Insufficient pool asset: required: %s, available: %s", sdk.NewCoin(denomA, defaultAmount.Add(osmomath.OneInt())), sdk.NewCoin(denomA, defaultAmount)),
 		},
 		"non-zero swap fee": {
 			initialCoins:         initalDefaultSupply,
-			tokenOut:             sdk.NewCoin(denomA, defaultAmount.Sub(sdk.OneInt())),
+			tokenOut:             sdk.NewCoin(denomA, defaultAmount.Sub(osmomath.OneInt())),
 			tokenInDenom:         denomB,
-			swapFee:              sdk.MustNewDecFromStr(nonZeroFeeStr),
-			expectedErrorMessage: fmt.Sprintf("Invalid swap fee: expected: %s, actual: %s", sdk.ZeroInt(), nonZeroFeeStr),
+			tokenInMaxAmount:     defaultAmount.Sub(osmomath.OneInt()),
+			swapFee:              osmomath.MustNewDecFromStr(nonZeroFeeStr),
+			expectedErrorMessage: fmt.Sprintf("Invalid swap fee: expected: %s, actual: %s", osmomath.ZeroInt(), nonZeroFeeStr),
 		},
 		"invalid pool given": {
-			initialCoins:  sdk.NewCoins(sdk.NewCoin(denomA, defaultAmount), sdk.NewCoin(denomB, defaultAmount)),
-			tokenOut:      sdk.NewCoin(denomA, defaultAmount.Sub(sdk.OneInt())),
-			tokenInDenom:  denomB,
-			isInvalidPool: true,
+			initialCoins:     sdk.NewCoins(sdk.NewCoin(denomA, defaultAmount), sdk.NewCoin(denomB, defaultAmount)),
+			tokenOut:         sdk.NewCoin(denomA, defaultAmount.Sub(osmomath.OneInt())),
+			tokenInDenom:     denomB,
+			tokenInMaxAmount: defaultAmount.Sub(osmomath.OneInt()),
+			isInvalidPool:    true,
 
 			expectedErrorMessage: types.InvalidPoolTypeError{
 				ActualPool: &clmodel.Pool{},
@@ -334,7 +344,7 @@ func (s *PoolModuleSuite) TestCalcInAmtGivenOut_SwapInAmtGivenOut() {
 	for name, tc := range tests {
 		tc := tc
 		s.Run(name, func() {
-			s.SetupTest()
+			s.Setup()
 
 			cosmwasmPoolKeeper := s.App.CosmwasmPoolKeeper
 
@@ -376,17 +386,11 @@ func (s *PoolModuleSuite) TestCalcInAmtGivenOut_SwapInAmtGivenOut() {
 			s.Require().Equal(originalPoolBalances.String(), afterCalcPoolBalances.String())
 
 			swapper := s.TestAccs[1]
+
 			// fund swapper
-			if !tc.expectedTokenIn.IsNil() {
-				// Fund with expected token in
-				s.FundAcc(swapper, sdk.NewCoins(tc.expectedTokenIn))
-			} else {
-				// Fund with pool reserve of token in denom
-				// This case happens in the error case, and we want
-				// to make sure that the error that we get is not
-				// due to insufficient funds.
-				s.FundAcc(swapper, sdk.NewCoins(sdk.NewCoin(tc.tokenInDenom, defaultAmount)))
-			}
+			s.FundAcc(swapper, sdk.NewCoins(sdk.NewCoin(tc.tokenInDenom, tc.tokenInMaxAmount)))
+
+			beforeSwapSwapperBalances := s.App.BankKeeper.GetAllBalances(s.Ctx, swapper)
 
 			// system under test non-mutative.
 			actualSwapTokenIn, err := cosmwasmPoolKeeper.SwapExactAmountOut(s.Ctx, swapper, poolIn, tc.tokenInDenom, tc.tokenInMaxAmount, tc.tokenOut, tc.swapFee)
@@ -405,7 +409,7 @@ func (s *PoolModuleSuite) TestCalcInAmtGivenOut_SwapInAmtGivenOut() {
 			s.Require().Equal(expectedPoolBalances.String(), afterSwapPoolBalances.String())
 
 			// Assert that swapper balance is updated correctly
-			expectedSwapperBalances := sdk.NewCoins(tc.tokenOut)
+			expectedSwapperBalances := beforeSwapSwapperBalances.Sub(sdk.NewCoins(tc.expectedTokenIn)).Add(tc.tokenOut)
 			afterSwapSwapperBalances := s.App.BankKeeper.GetAllBalances(s.Ctx, swapper)
 			s.Require().Equal(expectedSwapperBalances.String(), afterSwapSwapperBalances.String())
 		})
@@ -435,7 +439,7 @@ func (s *PoolModuleSuite) TestGetTotalPoolLiquidity() {
 	for name, tc := range tests {
 		tc := tc
 		s.Run(name, func() {
-			s.SetupTest()
+			s.Setup()
 
 			cosmwasmPoolKeeper := s.App.CosmwasmPoolKeeper
 

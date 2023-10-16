@@ -15,13 +15,14 @@ import (
 	"github.com/spf13/cobra"
 	abci "github.com/tendermint/tendermint/abci/types"
 
-	"github.com/osmosis-labs/osmosis/v16/simulation/simtypes"
-	cosmwasmpool "github.com/osmosis-labs/osmosis/v16/x/cosmwasmpool"
-	moduleclient "github.com/osmosis-labs/osmosis/v16/x/cosmwasmpool/client"
-	"github.com/osmosis-labs/osmosis/v16/x/cosmwasmpool/client/grpc"
-	"github.com/osmosis-labs/osmosis/v16/x/cosmwasmpool/client/queryproto"
-	"github.com/osmosis-labs/osmosis/v16/x/cosmwasmpool/model"
-	"github.com/osmosis-labs/osmosis/v16/x/cosmwasmpool/types"
+	"github.com/osmosis-labs/osmosis/v20/simulation/simtypes"
+	cosmwasmpool "github.com/osmosis-labs/osmosis/v20/x/cosmwasmpool"
+	moduleclient "github.com/osmosis-labs/osmosis/v20/x/cosmwasmpool/client"
+	"github.com/osmosis-labs/osmosis/v20/x/cosmwasmpool/client/cli"
+	"github.com/osmosis-labs/osmosis/v20/x/cosmwasmpool/client/grpc"
+	"github.com/osmosis-labs/osmosis/v20/x/cosmwasmpool/client/queryproto"
+	"github.com/osmosis-labs/osmosis/v20/x/cosmwasmpool/model"
+	"github.com/osmosis-labs/osmosis/v20/x/cosmwasmpool/types"
 )
 
 var (
@@ -29,21 +30,28 @@ var (
 	_ module.AppModuleBasic = AppModuleBasic{}
 )
 
-type AppModuleBasic struct{}
+type AppModuleBasic struct {
+	cdc codec.Codec
+}
 
 func (AppModuleBasic) Name() string { return types.ModuleName }
 
 func (AppModuleBasic) RegisterLegacyAminoCodec(cdc *codec.LegacyAmino) {
 	model.RegisterCodec(cdc)
+	types.RegisterCodec(cdc)
 }
 
 func (AppModuleBasic) DefaultGenesis(cdc codec.JSONCodec) json.RawMessage {
-	return nil
+	return cdc.MustMarshalJSON(types.DefaultGenesis())
 }
 
 // ValidateGenesis performs genesis state validation for the cosmwasmpool module.
 func (AppModuleBasic) ValidateGenesis(cdc codec.JSONCodec, config client.TxEncodingConfig, bz json.RawMessage) error {
-	return nil
+	var genState types.GenesisState
+	if err := cdc.UnmarshalJSON(bz, &genState); err != nil {
+		return fmt.Errorf("failed to unmarshal %s genesis state: %w", types.ModuleName, err)
+	}
+	return genState.Validate()
 }
 
 // ---------------------------------------
@@ -58,11 +66,11 @@ func (b AppModuleBasic) RegisterGRPCGatewayRoutes(clientCtx client.Context, mux 
 }
 
 func (b AppModuleBasic) GetTxCmd() *cobra.Command {
-	return nil
+	return cli.NewTxCmd()
 }
 
 func (b AppModuleBasic) GetQueryCmd() *cobra.Command {
-	return nil
+	return cli.NewQueryCmd()
 }
 
 // RegisterInterfaces registers interfaces and implementations of the gamm module.
@@ -79,12 +87,13 @@ type AppModule struct {
 
 func (am AppModule) RegisterServices(cfg module.Configurator) {
 	types.RegisterMsgServer(cfg.MsgServer(), cosmwasmpool.NewMsgServerImpl(&am.k))
+	model.RegisterMsgCreatorServer(cfg.MsgServer(), cosmwasmpool.NewMsgCreatorServerImpl(&am.k))
 	queryproto.RegisterQueryServer(cfg.QueryServer(), grpc.Querier{Q: moduleclient.NewQuerier(am.k)})
 }
 
-func NewAppModule(cosmwasmpoolKeeper cosmwasmpool.Keeper) AppModule {
+func NewAppModule(cdc codec.Codec, cosmwasmpoolKeeper cosmwasmpool.Keeper) AppModule {
 	return AppModule{
-		AppModuleBasic: AppModuleBasic{},
+		AppModuleBasic: AppModuleBasic{cdc: cdc},
 		k:              cosmwasmpoolKeeper,
 	}
 }
@@ -109,13 +118,17 @@ func (am AppModule) LegacyQuerierHandler(legacyQuerierCdc *codec.LegacyAmino) sd
 // InitGenesis performs genesis initialization for the cosmwasmpool module.
 // no validator updates.
 func (am AppModule) InitGenesis(ctx sdk.Context, cdc codec.JSONCodec, gs json.RawMessage) []abci.ValidatorUpdate {
+	var genState types.GenesisState
+	cdc.MustUnmarshalJSON(gs, &genState)
+	am.k.InitGenesis(ctx, &genState, am.cdc)
 	return []abci.ValidatorUpdate{}
 }
 
 // ExportGenesis returns the exported genesis state as raw bytes for the cosmwasmpool.
 // module.
 func (am AppModule) ExportGenesis(ctx sdk.Context, cdc codec.JSONCodec) json.RawMessage {
-	return nil
+	genState := am.k.ExportGenesis(ctx)
+	return cdc.MustMarshalJSON(genState)
 }
 
 // BeginBlock performs a no-op.
