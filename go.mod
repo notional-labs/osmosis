@@ -403,3 +403,5 @@ replace (
 
 // exclusion so we use v1.0.0
 exclude github.com/coinbase/rosetta-sdk-go v0.7.9
+
+replace github.com/cometbft/cometbft => ./cometbft
