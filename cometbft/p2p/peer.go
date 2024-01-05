@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"fmt"
+	"github.com/cometbft/cometbft/metrics"
 	"net"
 	"reflect"
 	"time"
@@ -404,6 +405,19 @@ func createMConnection(
 			// which does onPeerError.
 			panic(fmt.Sprintf("Unknown channel %X", chID))
 		}
+
+		metrics.Instance().RecordValue(
+			metrics.NetAddrToIp(conn.RemoteAddr()),
+			reactor.String()+"_Count",
+			1,
+		)
+
+		metrics.Instance().RecordValue(
+			metrics.NetAddrToIp(conn.RemoteAddr()),
+			reactor.String()+"_Bytes",
+			float64(len(msgBytes)),
+		)
+
 		mt := msgTypeByChID[chID]
 		msg := proto.Clone(mt)
 		err := proto.Unmarshal(msgBytes, msg)
